@@ -1,5 +1,5 @@
 #/usr/bin/env python3.6
-import math
+import math, pdb
 import re
 import argparse
 import warnings
@@ -140,6 +140,11 @@ def do_epoch(args, mode: str, net: Any, device: Any, epc: int,
     loss_weights = [a * b for a, b in zip(loss_weights, mult_lw)]
     losses_vec, source_vec, target_vec, baseline_target_vec = [], [], [], []
     pen_count = 0
+
+    if total_images==0:
+        print("total_images is zero!")
+        pdb.set_trace()
+
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         count_losses = 0
@@ -190,6 +195,16 @@ def do_epoch(args, mode: str, net: Any, device: Any, epc: int,
             all_sizes2[sm_slice, ...] = torch.sum(predicted_mask,dim=(2,3)) 
             all_gt_sizes[sm_slice, ...] = torch.sum(target_gt,dim=(2,3)) 
             # # for 3D dice
+            '''
+            if 'ctslice' in args.grp_regex:
+                try:
+                  all_grp[sm_slice, ...] = torch.FloatTensor([int(re.split('_',re.split('ctslice',x)[1])[0]) for x in filenames_target]).unsqueeze(1).repeat(1,C)
+                except:
+                    pdb.set_trace()
+            elif 'mrslice' in args.grp_regex:
+                all_grp[sm_slice, ...] = torch.FloatTensor([int(re.split('_',re.split('mrslice',x)[1])[0]) for x in filenames_target]).unsqueeze(1).repeat(1,C)
+            '''
+            
             if 'slice' in args.grp_regex:
                 all_grp[sm_slice, ...] = torch.FloatTensor([int(re.split('_',re.split('slice',x)[1])[0]) for x in filenames_target]).unsqueeze(1).repeat(1,C)
                 #all_grp[sm_slice, ...] = torch.FloatTensor([int(re.split('_',re.split('Subj',x)[1])[0]) for x in filenames_target]).unsqueeze(1).repeat(1,C)
@@ -232,6 +247,9 @@ def do_epoch(args, mode: str, net: Any, device: Any, epc: int,
             nice_dict = {k: f"{v:.4f}" for (k, v) in stat_dict.items()}
             done += B
             tq_iter.set_postfix(nice_dict)
+
+            
+
     if args.dice_3d and (mode == 'val'):
         dice_3d_log, dice_3d_sd_log, asd_3d_log, asd_3d_sd_log, hd_3d_log, hd_3d_sd_log = dice3d(all_grp, all_inter_card, all_card_gt, all_card_pred,all_pred,all_gt,all_pnames,metric_axis,args.pprint,args.do_hd, best_dice3d_val)
           
@@ -244,11 +262,16 @@ def do_epoch(args, mode: str, net: Any, device: Any, epc: int,
     size_mean_pos = torch.index_select(all_sizes2, 1, indices).sum(dim=0).cpu().numpy()/mask_pos.sum(dim=0).cpu().numpy()
     gt_size_mean_pos = torch.index_select(all_gt_sizes, 1, indices).sum(dim=0).cpu().numpy()/gt_pos.sum(dim=0).cpu().numpy()
     size_mean2 = torch.index_select(all_sizes2, 1, indices).mean(dim=0).cpu().numpy()
-    losses_vec = [loss_se.mean().item(),loss_cons.mean().item(),loss_tot.mean().item(),np.int(size_mean.mean()),np.int(size_mean_pos.mean()),np.int(size_gt_mean.mean()),np.int(gt_size_mean_pos.mean())]
+    try:
+      losses_vec = [np.nanmean(loss_se.cpu().numpy()),np.nanmean(loss_cons.cpu().numpy()), np.nanmean(loss_tot.cpu().numpy()), np.int(np.nanmean(size_mean)), np.int(np.nanmean(size_mean_pos)), np.int(np.nanmean(size_gt_mean)), np.int(np.nanmean(gt_size_mean_pos)) ]
+    except Exception as exc:
+      import traceback; print(traceback.format_exc())
+      losses_vec = [0,0,0,0,0,0,0]
+      pdb.set_trace()
     if not epc%10:
         df_t = pd.DataFrame({
            "val_ids":all_pnames,
-           "proposal_size":all_sizes2.cpu()})
+           "proposal_size":all_sizes2.cpu().numpy().tolist()})
         df_t.to_csv(Path(savedir,mode+str(epc)+"sizes.csv"), float_format="%.4f", index_label="epoch")
     return losses_vec, target_vec,source_vec
 
@@ -296,7 +319,8 @@ def run(args: argparse.Namespace) -> None:
                 tra_target_vec = val_target_vec
                 tra_source_vec = val_source_vec
        else:
-            tra_losses_vec, tra_target_vec,tra_source_vec                                    = do_epoch(args, "train", net, device,
+            if True: # Set False to debug validation phase
+              tra_losses_vec, tra_target_vec,tra_source_vec                                    = do_epoch(args, "train", net, device,
                                                                                            i, loss_fns,
                                                                                            loss_weights,
                                                                                            args.resize,
@@ -304,7 +328,6 @@ def run(args: argparse.Namespace) -> None:
                                                                                            savedir=savedir,
                                                                                            optimizer=optimizer,
                                                                                            target_loader=target_loader, best_dice3d_val=best_3d_dice)
-       
             with torch.no_grad():
                 val_losses_vec, val_target_vec,val_source_vec                                        = do_epoch(args, "val", net, device,
                                                                                                i, loss_fns,
@@ -344,24 +367,29 @@ def run(args: argparse.Namespace) -> None:
        if args.saveim:
            rmtree(Path(savedir, f"iter{i:03d}"))
 
-       df_t_tmp = pd.DataFrame({
-            "epoch":i,
-            "tra_loss_s":[tra_losses_vec[0]],
-            "tra_loss_cons":[tra_losses_vec[1]],
-            "tra_loss_tot":[tra_losses_vec[2]],
-            "tra_size_mean":[tra_losses_vec[3]],
-            "tra_size_mean_pos":[tra_losses_vec[4]],
-            "val_loss_s":[val_losses_vec[0]],
-            "val_loss_cons":[val_losses_vec[1]],
-            "val_loss_tot":[val_losses_vec[2]],
-            "val_size_mean":[val_losses_vec[3]],
-            "val_size_mean_pos":[val_losses_vec[4]],
-            "val_gt_size_mean":[val_losses_vec[5]],
-            "val_gt_size_mean_pos":[val_losses_vec[6]],
-            'tra_dice': [tra_target_vec[4]],
-            'val_dice': [val_target_vec[4]],
-            "val_dice_3d_sd": [val_target_vec[1]],
-            "val_dice_3d": [val_target_vec[0]]})
+       try:
+        df_t_tmp = pd.DataFrame({
+              "epoch":i,
+              "tra_loss_s":[tra_losses_vec[0]],
+              "tra_loss_cons":[tra_losses_vec[1]],
+              "tra_loss_tot":[tra_losses_vec[2]],
+              "tra_size_mean":[tra_losses_vec[3]],
+              "tra_size_mean_pos":[tra_losses_vec[4]],
+              "val_loss_s":[val_losses_vec[0]],
+              "val_loss_cons":[val_losses_vec[1]],
+              "val_loss_tot":[val_losses_vec[2]],
+              "val_size_mean":[val_losses_vec[3]],
+              "val_size_mean_pos":[val_losses_vec[4]],
+              "val_gt_size_mean":[val_losses_vec[5]],
+              "val_gt_size_mean_pos":[val_losses_vec[6]],
+              'tra_dice': [tra_target_vec[4]],
+              'val_dice': [val_target_vec[4]],
+              "val_dice_3d_sd": [val_target_vec[1].cpu().numpy()],
+              "val_dice_3d": [val_target_vec[0].cpu().numpy()]})
+       except Exception as exc:
+           print(exc)
+           pdb.set_trace()
+
 
        if i == 0:
             df_t = df_t_tmp

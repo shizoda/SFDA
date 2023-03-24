@@ -3,6 +3,7 @@
 import io
 import re
 import random
+from termcolor import cprint
 from operator import itemgetter
 from pathlib import Path
 from itertools import repeat
@@ -22,6 +23,23 @@ from utils import simplex, sset, one_hot, pad_to, remap
 
 F = Union[Path, BinaryIO]
 D = Union[Image.Image, np.ndarray, Tensor]
+
+
+class Sampler(object):
+    r"""Base class for all Samplers.
+    Every Sampler subclass has to provide an __iter__ method, providing a way
+    to iterate over indices of dataset elements, and a __len__ method that
+    returns the length of the returned iterators.
+    """
+
+    def __init__(self, data_source):
+        pass
+
+    def __iter__(self):
+        raise NotImplementedError
+
+    def __len__(self):
+        raise 
             
 def get_loaders(args, data_folder: str, subfolders:str,
                 batch_size: int, n_class: int,
@@ -153,7 +171,7 @@ def get_loaders(args, data_folder: str, subfolders:str,
         print('Inference will be done on "train" folder')
         val_folders: List[Path] = [Path(data_folder, "train", f) for f in valfolders]
     else:#/
-        print('Inference will be done on "val" folder')
+        cprint('Inference will be done on "val" folder', "yellow")
         val_folders: List[Path] = [Path(data_folder, "val", f) for f in valfolders]
     val_names: List[str] = map_(lambda p: str(p.name), val_folders[0].glob("*.png"))
     if len(val_names)==0:
@@ -163,7 +181,8 @@ def get_loaders(args, data_folder: str, subfolders:str,
     val_set = valgen_dataset(val_names,
                           val_folders)
 
-
+    cprint(val_folders, "yellow")
+    #  cprint(val_names, "blue")
     val_loader = data_loader(val_set,
                             batch_size=batch_size,
                             shuffle=False,
@@ -242,7 +261,8 @@ class SliceDataset(Dataset):
         images: List[D]
         files  = SliceDataset.load_images(self.folders, [filename], self.in_memory)
         if path_name.suffix == ".png":
-            images = [Image.open(files[index]).convert('L') for files in self.files]
+            # images = [Image.open(files[index]).convert('L') for files in self.files]
+            images =  images = [np.asarray(Image.open(files[index]).convert('L'))[np.newaxis,...] for files in self.files]
         elif path_name.suffix == ".nii":
             #print(files)
             try:
@@ -268,11 +288,13 @@ class SliceDataset(Dataset):
                 assert one_hot(ttensor, axis=0)
             #assert ttensor.shape == (self.C, w, h)
 
+        
         img, gt = t_tensors[:2]
         try:
             bounds = [f(img, gt, t, filename) for f, t in zip(self.bounds_generators, t_tensors[2:])]
-        except:
-            print(self.folders, filename, self.bounds_generator)
+        except Exception as exc:
+            print(exc)
+            print(self.folders, filename, self.bounds_generators)
         # return t_tensors + [filename] + bounds
         return [filename] + t_tensors + bounds
 

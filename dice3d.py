@@ -35,8 +35,8 @@ def dice3d(all_grp,all_inter_card,all_card_gt,all_card_pred,all_pred,all_gt,all_
     batch_hd = torch.zeros((len(unique_patients), C))
     batch_asd = torch.zeros((len(unique_patients), C))
     if do_hd>0 or do_asd>0:
-        all_pred = all_pred.cpu().numpy()
-        all_gt = all_gt.cpu().numpy()
+        all_pred = np.array(all_pred) #.cpu().numpy()
+        all_gt = np.array(all_gt) #.cpu().numpy()
     # do DICE
     for i, p in enumerate(unique_patients):
         inter_card_p = torch.einsum("bc->c", [torch.masked_select(all_inter_card, all_grp == p).reshape((-1, C))])
