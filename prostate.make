@@ -12,7 +12,7 @@ CFLAGS = -O
 G_RGX = Case\d+_\d+
 
 TT_DATA = [('IMG', nii_transform2, False), ('GT', nii_gt_transform2, False), ('GT', nii_gt_transform2, False)]
-L_OR = [('CrossEntropy', {'idc': [0,1], 'weights':[1,1]}, None, None, None, 1)]
+L_OR = [('CrossEntropy', {'idc': [0,1,2], 'weights':[1,1,1]}, None, None, None, 1)]
 NET = UNet
 
 #the network weights used as initialization of the adaptation
@@ -49,13 +49,13 @@ results/prostate/fs: OPT =  --target_losses="$(L_OR)" \
 	     --network UNet --model_weights="$(M_WEIGHTS_uce)" --lr_decay 1 \
 
 # SFDA. Put --saveim False and remove --entmap and --do_hd 90 to speed up
-results/prostate/sfda: OPT = --target_losses="[('EntKLProp', {'lamb_se':1, 'lamb_consprior':1,'ivd':True,'weights_se':[0.1,0.9],'idc_c': [1],'curi':True,'power': 1},'PredictionBounds', \
+results/prostate/sfda: OPT = --target_losses="[('EntKLProp', {'lamb_se':1, 'lamb_consprior':1,'lamb_conspred':1, 'ivd':True,'weights_se':[0.1,0.9],'idc_c': [1],'curi':True,'power': 1},'PredictionBounds', \
       {'margin':0,'dir':'high','idc':[0,1],'predcol':'dumbpredwtags','power': 1, 'mode':'percentage','sizefile':'sizes/prostate.csv'},'norm_soft_size',1)]" \
            --do_hd 90 --saveim True --entmap --l_rate 0.000001 --n_epoch 100 --lr_decay 0.9 --model_weights="$(M_WEIGHTS_ul)" \
 
 $(TRN) :
-	$(CC) $(CFLAGS) main_sfda.py --batch_size 24 --n_class 2 --workdir $@_tmp --target_dataset "data/prostate_target" \
-                --metric_axis 1  --n_epoch 100 --dice_3d --l_rate 5e-4 --weight_decay 1e-4 --grp_regex="$(G_RGX)" --network=$(NET) --val_target_folders="$(TT_DATA)"\
+	$(CC) $(CFLAGS) main_sfda.py --batch_size 18 --n_class 3 --workdir $@_tmp --target_dataset "data/prostate_target" \
+                --metric_axis 1  --n_epoch 100 --l_rate 5e-4 --weight_decay 1e-4 --grp_regex="$(G_RGX)" --network=$(NET) --val_target_folders="$(TT_DATA)"\
                   --lr_decay 0.9  --model_weights="$(M_WEIGHTS_uce)"  --target_folders="$(TT_DATA)" $(OPT) $(DEBUG)
 	mv $@_tmp $@
 
