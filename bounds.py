@@ -28,7 +28,7 @@ class PredictionBounds():
         self.dir: str = kwargs['dir']
         self.mode = "percentage" 
         self.sizefile: float = kwargs['sizefile']
-        self.sizes = pd.read_csv(self.sizefile)
+        self.sizes = pd.read_csv(self.sizefile, sep=";")
         self.predcol: bool = kwargs['predcol']
         
         print(f"Initialized {self.__class__.__name__} with {kwargs}")
@@ -38,11 +38,11 @@ class PredictionBounds():
         pred_size_col = self.predcol
         try:
             # value = eval(self.sizes.loc[self.sizes.val_ids == filename, pred_size_col].values[0])
-            value = eval(self.sizes.loc[self.sizes.val_ids == filename.replace(".png", ".nii"), pred_size_col].values[0])
+            value = eval(self.sizes.loc[self.sizes.val_ids == filename, pred_size_col].values[0])
         except:
             print('could not find the following image in the class-ratio estimation file:',filename)
             #print(self.sizes[pred_size_col])
-            value = self.sizes.loc[self.sizes.val_ids == filename.replace(".png", ".nii"), pred_size_col].values[0]
+            value = self.sizes.loc[self.sizes.val_ids == filename, pred_size_col].values[0]
         value = torch.tensor([value]).squeeze(0)
         #with_margin: Tensor = torch.stack([value, value], dim=-1)
         #assert with_margin.shape == (*value.shape, 2), with_margin.shape
@@ -191,7 +191,7 @@ class BoxBounds():
 
 def CheckBounds(**kwargs):
         sizefile: float = kwargs['sizefile']
-        sizes = pd.read_csv(sizefile)
+        sizes = pd.read_csv(sizefile, sep=";")
         print(kwargs.keys())
         predcol: str = kwargs['predcol']
         # import pdb; pdb.set_trace()
@@ -199,4 +199,5 @@ def CheckBounds(**kwargs):
             return True
         else:
             print('size pred not in file')
+            import pdb; pdb.set_trace()
             return False

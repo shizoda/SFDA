@@ -61,7 +61,7 @@ if __name__=="__main__":
       # prefix="ctslice" if purp=="train" else "valctslice"
 
       inDir = os.path.join("dataOld", mod, purp)
-      outDir = os.path.join("/home/data/pub/mmwhs/bateson/sfda/data", mod, purp)
+      outDir = os.path.join("./data_mmwhs", mod, purp)
       os.makedirs(os.path.join(outDir, "GT"),  exist_ok=True)
       os.makedirs(os.path.join(outDir, "IMG"), exist_ok=True)
       
@@ -76,7 +76,7 @@ if __name__=="__main__":
         
         for idxZ in range(imgArr.shape[2]):
           prefix = ("val" if purp=="val" else "") + mod + "slice"
-          outName = prefix + os.path.basename(fileName).replace(".nii","").replace(".gz","") + "_" + str(idxZ) + ".nii"
+          outName = prefix + os.path.basename(fileName).replace(".nii","").replace(".gz","") + "_" + str(idxZ+1) + ".nii"
           nib.save(nib.Nifti1Image(gtArr[..., 0][np.newaxis, ...].astype(np.uint8), defaultAffine), os.path.join(outDir, "GT", outName ))
           nib.save(nib.Nifti1Image(imgArr[..., idxZ][np.newaxis, ...], defaultAffine), os.path.join(outDir, "IMG",  outName))
 
@@ -84,7 +84,7 @@ if __name__=="__main__":
           df = df.append(record, ignore_index=True)
         
         if debug and idx>30:
-          break
+          break 
   
     # Average for training data of each modality
     sset = df[df["modality"]==mod][df["purpose"]=="train"]
