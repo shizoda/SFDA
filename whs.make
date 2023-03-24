@@ -21,6 +21,7 @@ M_WEIGHTS_ul = results/whs/cesource/last.pkl
 
 #run the main experiments
 # TRN = results/whs/cesource results/whs/sfda results/whs/cesourceim
+
 TRN = results/whs/sfda
 # TRN = results/whs/cesourceim
 # TRN = results/whs/fs

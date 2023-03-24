@@ -37,12 +37,11 @@ class PredictionBounds():
         c,w,h=target.shape 
         pred_size_col = self.predcol
         try:
-            # value = eval(self.sizes.loc[self.sizes.val_ids == filename, pred_size_col].values[0])
             value = eval(self.sizes.loc[self.sizes.val_ids == filename, pred_size_col].values[0])
         except:
             print('could not find the following image in the class-ratio estimation file:',filename)
             #print(self.sizes[pred_size_col])
-            value = self.sizes.loc[self.sizes.val_ids == filename, pred_size_col].values[0]
+            value = self.sizes.loc[self.sizes.val_ids == filename.replace(".png", ".nii"), pred_size_col].values[0]
         value = torch.tensor([value]).squeeze(0)
         #with_margin: Tensor = torch.stack([value, value], dim=-1)
         #assert with_margin.shape == (*value.shape, 2), with_margin.shape
@@ -191,7 +190,11 @@ class BoxBounds():
 
 def CheckBounds(**kwargs):
         sizefile: float = kwargs['sizefile']
+<<<<<<< HEAD
         sizes = pd.read_csv(sizefile, sep=";")
+=======
+        sizes = pd.read_csv(sizefile)
+>>>>>>> 49610e6b94345c227ba7a8d8132746a1b6b1b5e2
         print(kwargs.keys())
         predcol: str = kwargs['predcol']
         # import pdb; pdb.set_trace()
