@@ -86,11 +86,7 @@ if __name__=="__main__":
           df = df.append(record, ignore_index=True)
         
         if debug and idx>30:
-<<<<<<< HEAD
           break 
-=======
-          break
->>>>>>> 49610e6b94345c227ba7a8d8132746a1b6b1b5e2
   
     # Average for training data of each modality
     sset = df[df["modality"]==mod][df["purpose"]=="train"]
@@ -101,4 +97,4 @@ if __name__=="__main__":
     dfs.append(df)
 
   df = pd.concat(dfs)
-  df.to_csv("/home/hoda/git/SFDA/sizes/whs_simple.csv", index=False)
+  df.to_csv("./sizes/whs_simple.csv", index=False)

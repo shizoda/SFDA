@@ -190,15 +190,15 @@ class BoxBounds():
 
 def CheckBounds(**kwargs):
         sizefile: float = kwargs['sizefile']
-<<<<<<< HEAD
         sizes = pd.read_csv(sizefile, sep=";")
-=======
-        sizes = pd.read_csv(sizefile)
->>>>>>> 49610e6b94345c227ba7a8d8132746a1b6b1b5e2
         print(kwargs.keys())
         predcol: str = kwargs['predcol']
         # import pdb; pdb.set_trace()
         if predcol in tuple(sizes.columns):
+            return True
+        elif str(sizes.columns[0]).find(predcol)>=0:
+            print("Warning: skipping columns")
+            import pdb; pdb.set_trace()
             return True
         else:
             print('size pred not in file')

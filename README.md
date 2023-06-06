@@ -1,9 +1,17 @@
+# Modified version of SFDA
+
+This is the fork for our improvements of Source-Free Domain Adaptation pubished by Mathilde Bateson, et al.
+
+https://github.com/mathilde-b offers the original source code. Following texts are copied from this original repository.
+
+Many thanks for the original authors!
+
 # Source-Free Domain Adaptation
 We introduce Source-Free Domain Adaptation for Image Segmentation.
 
 [Mathilde Bateson](https://github.com/mathilde-b), [Hoel Kervadec](https://github.com/HKervadec), [Jose Dolz](https://github.com/josedolz), Hervé Lombaert, Ismail Ben Ayed @ETS Montréal
 
-Code of our submission at MICCAI 2020 and its MedIA journal extension. Video of the MICCAI talk is available: 
+Code of the submission at MICCAI 2020 and its MedIA journal extension. Video of the MICCAI talk is available: 
 https://www.youtube.com/watch?v=ALYaa5xrxbQ&ab_channel=MB
 
 * [MedIA extension](https://www.sciencedirect.com/science/article/pii/S1361841522002456)

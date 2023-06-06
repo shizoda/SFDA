@@ -17,14 +17,18 @@ L_OR = [('CrossEntropy', {'idc': [0,1,2,3,4], 'weights':[1,1,1,1,1]}, None, None
 NET = UNet
 
 #the network weights used as initialization of the adaptation
-M_WEIGHTS_ul = results/whs/cesource/last.pkl
+# M_WEIGHTS_ul = results/whs/cesource/last.pkl
+M_WEIGHTS_uce = results/whs/cesource/last.pkl
 
 #run the main experiments
 # TRN = results/whs/cesource results/whs/sfda results/whs/cesourceim
-
-TRN = results/whs/sfda
-# TRN = results/whs/cesourceim
+# TRN = results/whs/sfda# 
+TRN = results/whs/cesourceim
 # TRN = results/whs/fs
+# TRN = results/whs/src2src
+# TRN = results/whs/tempinf
+# TRN = results/whs/sfda results/whs/cesourceim
+
 
 REPO = $(shell basename `git rev-parse --show-toplevel`)
 DATE = $(shell date +"%y%m%d")
@@ -47,7 +51,12 @@ $(PACK): $(TRN) $(INF_0) $(TRN_1) $(INF_1) $(TRN_2) $(TRN_3) $(TRN_4)
 # first train on the source dataset only:
 results/whs/cesource: OPT =  --target_losses="$(L_OR)" --target_dataset "data_mmwhs/mr" \
 	     --network UNet --model_weights="" --l_rate 5e-4 --lr_decay 1  \
-	    
+
+# Direct prediction on source dataset
+OPT =  --target_losses="$(L_OR)"  --target_dataset "data_mmwhs/ct" \
+	   --mode makeim  --batch_size 1  --l_rate 0 --model_weights="results/whs/cesource/last.pkl" --pprint --lr_decay 1 --n_epoch 1 --saveim True\
+
+
 # full supervision
 results/whs/fs: OPT =  --target_losses="$(L_OR)" \
 	     --network UNet --model_weights="$(M_WEIGHTS_uce)" --lr_decay 1 \
@@ -59,7 +68,12 @@ results/whs/sfda: OPT = --target_losses="[('EntKLProp', {'curi':True,'lamb_se':1
 
 #inference mode : saves the segmentation masks for a specific model saved as pkl file (ex. "results/sa/cesource/last.pkl" below):
 results/whs/cesourceim: OPT =  --target_losses="$(L_OR)" \
-	   --mode makeim  --batch_size 1  --l_rate 0 --model_weights="results/whs/cesource/last.pkl" --pprint --lr_decay 1 --n_epoch 1 --saveim True\
+	   --mode makeim  --batch_size 1  --l_rate 0 --model_weights="results/whs/sfda/last.pkl" --pprint --lr_decay 1 --n_epoch 1 --saveim True\
+
+#inference mode : saves the segmentation masks for a specific model saved as pkl file (ex. "results/sa/cesource/last.pkl" below):
+results/whs/tempinf: OPT =  --target_losses="$(L_OR)" \
+	   --mode makeim  --batch_size 1  --l_rate 0 --model_weights="results/whs/sfda_tmp/epoch_30.pkl" --pprint --lr_decay 1 --n_epoch 1 --saveim True\
+
 
 $(TRN) :
 	$(CC) $(CFLAGS) main_sfda.py --batch_size 24 --n_class 5 --workdir $@_tmp --target_dataset "data_mmwhs/ct" \

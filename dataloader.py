@@ -293,7 +293,7 @@ class SliceDataset(Dataset):
         try:
             bounds = [f(img, gt, t, filename) for f, t in zip(self.bounds_generators, t_tensors[2:])]
         except Exception as exc:
-            print(exc)
+            cprint(exc, "red")
             print(self.folders, filename, self.bounds_generators)
         # return t_tensors + [filename] + bounds
         return [filename] + t_tensors + bounds

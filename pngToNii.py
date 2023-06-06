@@ -35,7 +35,7 @@ def getPaths(dirPath):
       return int(text) if text.isdigit() else text
   def natural_keys(text):
       return [ atoi(c) for c in re.split(r'(\d+)', text) ]
-  return [path for path in sorted(glob.glob(os.path.join(dirPath, "*")), key=natural_keys) if path.find("_0.nii")>=0 or path.find("_0.png")>=0]
+  return [path for path in sorted(glob.glob(os.path.join(dirPath, "*")), key=natural_keys) if path.find(".nii")>=0 or path.find(".png")>=0]
 
 def groupWithPrefix(paths, outDir, suffix, nMax, useName=False, dtype=np.int16):
    names = [os.path.basename(path) for path in paths]
