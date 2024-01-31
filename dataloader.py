@@ -1,6 +1,6 @@
 #!/usr/env/bin python3.6
 
-import io
+import io, h5py
 import re
 import random
 from termcolor import cprint
@@ -139,7 +139,7 @@ def get_loaders(args, data_folder: str, subfolders:str,
                           bounds_generators=bounds_generators)
 
     data_loader = partial(DataLoader,
-                          num_workers=int(cpu_count()/2),
+                          num_workers=int(cpu_count()/2)-1,
                           #num_workers=min(cpu_count(), batch_size + 4),
                           #num_workers=1,
                           pin_memory=True)
@@ -219,6 +219,13 @@ class SliceDataset(Dataset):
         for files in self.files:
             assert len(files) == len(self.filenames)
 
+        # HDF5ファイルの存在確認
+        self.use_hdf5 = {}
+        for folder in self.folders:
+            hdf5_file = Path(folder, "allfiles.h5")
+            self.use_hdf5[folder] = hdf5_file.exists()
+            from termcolor import cprint; cprint(f"Using HDF5: {self.use_hdf5[folder]} for {os.path.basename(folder)}", "cyan")
+
         print(f"Initialized {self.__class__.__name__} with {len(self.filenames)} images")
 
     def check_files(self) -> bool:
@@ -257,24 +264,31 @@ class SliceDataset(Dataset):
 
     def __getitem__(self, index: int) -> List[Any]:
         filename: str = self.filenames[index]
-        path_name: Path = Path(filename)
-        images: List[D]
-        files  = SliceDataset.load_images(self.folders, [filename], self.in_memory)
-        if path_name.suffix == ".png":
-            # images = [Image.open(files[index]).convert('L') for files in self.files]
-            images =  images = [np.asarray(Image.open(files[index]).convert('L'))[np.newaxis,...] for files in self.files]
-        elif path_name.suffix == ".nii":
-            #print(files)
-            try:
-                images = [read_nii_image(f[0]) for f in files]
-            except:
-                images = [read_unknownformat_image(f[0]) for f in files]
-        elif path_name.suffix == ".npy":
-            images = [np.load(files[index]) for files in self.files]
-        else:
-            raise ValueError(filename)
-        if self.augment:
-            images = augment(*images)
+        images = []
+        
+        for folder in self.folders:
+            use_hdf5 = self.use_hdf5[folder]
+            path_name: Path = Path(folder, filename)
+
+            if use_hdf5:
+                with h5py.File(Path(folder, "allfiles.h5"), 'r') as h5f:
+                    image_data = h5f[filename][()]
+                images.append(image_data)
+            else:
+                if path_name.suffix == ".png":
+                    image = np.asarray(Image.open(path_name).convert('L'))[np.newaxis, ...]
+                elif path_name.suffix == ".nii":
+                    try:
+                        image = read_nii_image(path_name)
+                    except:
+                        image = read_unknownformat_image(path_name)
+                elif path_name.suffix == ".npy":
+                    image = np.load(path_name)
+                else:
+                    raise ValueError(f"Unsupported file type: {path_name.suffix}")
+                if self.augment:
+                    image = augment(image)
+                images.append(image)
 
         assert self.check_files()  # Make sure all file exists
         # Final transforms and assertions
