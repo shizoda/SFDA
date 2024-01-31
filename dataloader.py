@@ -139,7 +139,7 @@ def get_loaders(args, data_folder: str, subfolders:str,
                           bounds_generators=bounds_generators)
 
     data_loader = partial(DataLoader,
-                          num_workers=4,
+                          num_workers=int(cpu_count()/2),
                           #num_workers=min(cpu_count(), batch_size + 4),
                           #num_workers=1,
                           pin_memory=True)

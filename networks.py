@@ -1,6 +1,6 @@
 #!/usr/bin/env python3.6
 
-import math
+import math, os
 from typing import Iterable, Any
 
 import torch
@@ -13,6 +13,79 @@ from utils import compose_acc
 from layers import upSampleConv, conv_block_1, conv_block_3_3, conv_block_Asym
 from layers import conv_block, conv_block_3, maxpool, conv_decod_block
 from layers import convBatch, residualConv  # Imports for UNEt
+
+def count_parameters(model):
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    non_trainable_params = total_params - trainable_params
+    return trainable_params, non_trainable_params
+
+def export_for_netron(model, input_shape, output_dir, filename="model.onnx"):
+    x = torch.randn(input_shape)
+    y = model(x)
+    os.makedirs(output_dir, exist_ok=True)
+    torch.onnx.export(model, x, os.path.join(output_dir, filename), verbose=False, input_names=["input"], output_names=["output"])
+
+class monai(nn.Module):
+    
+    def __init__(self, in_channels=1, out_channels=8, device='cuda', network = "unetpp", img_size=(256, 256), n_layers = 3 ):
+        super(monai, self).__init__()
+
+        if network.lower() == "unet":
+          from monai.networks.nets import UNet
+          nG = 32
+          self.model = UNet(
+              spatial_dims=2,
+              in_channels=in_channels,
+              out_channels=out_channels,
+              channels=tuple(nG * (2 ** i) for i in range(n_layers)),  # チャンネル数を動的に設定
+              strides=(2,) * (n_layers - 1),  # ストライドを層の数に合わせる
+              num_res_units=2,  # 残差ユニットは使用しない
+              norm='BATCH',
+          )
+          
+        elif network.lower() == "segresnet":
+          self.model = SegResNet(
+            spatial_dims=2,
+            in_channels=in_channels,
+            out_channels=out_channels,
+            norm='BATCH',
+          )
+        
+        elif network.lower() == "swinunetr":
+           from monai.networks.nets import SwinUNETR
+           self.model = SwinUNETR(
+                img_size=img_size,  # 画像のサイズ
+                in_channels=in_channels,       # 入力チャネル数
+                out_channels=out_channels,      # 出力チャネル数 (クラス数)
+                spatial_dims=2,      # 空間次元数を2Dに設定
+                feature_size=48,     # 特徴サイズ
+                # 他のパラメータは必要に応じて設定
+            )
+        elif network.lower() == "unetpp":
+            from monai.networks.nets import BasicUNetPlusPlus
+            self.model = BasicUNetPlusPlus(
+                spatial_dims=2,
+                in_channels=in_channels,
+                out_channels=out_channels,
+                features=(16, 32, 64, 128, 256, 16),
+                deep_supervision=False,
+                act=('LeakyReLU', {'inplace': True, 'negative_slope': 0.1}),
+                norm=('instance', {'affine': True}),
+                bias=True,
+                dropout=0.0,
+                upsample='deconv'
+            )
+        else:
+          raise NotImplementedError("Network not implemented")
+        
+        export_for_netron(self.model, (1, 1, img_size[0], img_size[1]), "netron", "monai-" + network + "-nLayer" + str(n_layers) +  ".onnx")
+        print("n_parameters:", count_parameters(self.model))
+        self.model = self.model.to(device)
+
+    def forward(self, x):
+        x = self.model(x)
+        return x # F.softmax(x, dim=1)  # softmaxを適用
 
 
 

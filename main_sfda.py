@@ -31,7 +31,7 @@ from bounds import CheckBounds
 import matplotlib.pyplot as plt
 from itertools import chain
 import platform
-
+from termcolor import colored, cprint
 
 
 def setup(args, n_class, dtype) -> Tuple[Any, Any, Any, List[Callable], List[float],List[Callable], List[float], Callable]:
@@ -48,7 +48,13 @@ def setup(args, n_class, dtype) -> Tuple[Any, Any, Any, List[Callable], List[flo
             net = torch.load(args.model_weights)
     else:
         net_class = getattr(__import__('networks'), args.network)
-        net = net_class(1, n_class).type(dtype).to(device)
+
+        if args.network == "monai":
+          cprint("MONAI's network: " +args.monai, "green")
+          net = net_class(1, n_class, network=args.monai).type(dtype).to(device)
+        else:
+          net = net_class(1, n_class).type(dtype).to(device)
+
         net.apply(weights_init)
     net.to(device)
     if args.saveim:
@@ -163,7 +169,12 @@ def do_epoch(args, mode: str, net: Any, device: Any, epc: int,
             # Forward
             with torch.set_grad_enabled(mode == "train"):
                 pred_logits: Tensor = net(target_image)
-                pred_probs: Tensor = F.softmax(pred_logits, dim=1)
+                # pred_probs: Tensor = F.softmax(pred_logits, dim=1)
+                if isinstance(pred_logits, list):
+                    pred_probs = [F.softmax(logits, dim=1) for logits in pred_logits][0]
+                else:
+                    pred_probs = F.softmax(pred_logits, dim=1)
+                
                 predicted_mask: Tensor = probs2one_hot(pred_probs)  # Used only for dice computation
             assert len(bounds) == len(loss_fns) == len(loss_weights)
             if epc < n_warmup:
@@ -171,6 +182,7 @@ def do_epoch(args, mode: str, net: Any, device: Any, epc: int,
             loss: Tensor = torch.zeros(1, requires_grad=True).to(device)
             loss_vec = []
             loss_kw = []
+            
             for loss_fn,label, w, bound in zip(loss_fns,labels, loss_weights, bounds):
                 if w > 0:
                     if eval(args.target_losses)[0][0]=="EntKLProp": 
@@ -263,7 +275,7 @@ def do_epoch(args, mode: str, net: Any, device: Any, epc: int,
     gt_size_mean_pos = torch.index_select(all_gt_sizes, 1, indices).sum(dim=0).cpu().numpy()/gt_pos.sum(dim=0).cpu().numpy()
     size_mean2 = torch.index_select(all_sizes2, 1, indices).mean(dim=0).cpu().numpy()
     try:
-      losses_vec = [np.nanmean(loss_se.cpu().numpy()),np.nanmean(loss_cons.cpu().numpy()), np.nanmean(loss_tot.cpu().numpy()), np.int(np.nanmean(size_mean)), np.int(np.nanmean(size_mean_pos)), np.int(np.nanmean(size_gt_mean)), np.int(np.nanmean(gt_size_mean_pos)) ]
+      losses_vec = [np.nanmean(loss_se.cpu().numpy()),np.nanmean(loss_cons.cpu().numpy()), np.nanmean(loss_tot.cpu().numpy()), np.int32(np.nanmean(size_mean)), np.int32(np.nanmean(size_mean_pos)), np.int32(np.nanmean(size_gt_mean)), np.int32(np.nanmean(gt_size_mean_pos)) ]
     except Exception as exc:
       import traceback; print(traceback.format_exc())
       losses_vec = [0,0,0,0,0,0,0]
@@ -414,6 +426,7 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--val_target_folders", type=str, required=True,
                         help="List of (subfolder, transform, is_hot)")
     parser.add_argument("--network", type=str, required=True, help="The network to use")
+    parser.add_argument("--monai", type=str, default="UNet", help="If --network is monai, specify the model name")
     parser.add_argument("--grp_regex", type=str, required=True)
     parser.add_argument("--n_class", type=int, required=True)
     parser.add_argument("--mode", type=str, default="learn")
