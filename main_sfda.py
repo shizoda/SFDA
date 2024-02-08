@@ -26,12 +26,98 @@ from utils import exp_lr_scheduler
 import datetime
 from itertools import cycle
 import os
-from time import sleep
+from time import sleep, time
 from bounds import CheckBounds
 import matplotlib.pyplot as plt
 from itertools import chain
 import platform
 from termcolor import colored, cprint
+from copy import deepcopy;
+import torch
+import threading
+from pathlib import Path
+import nibabel as nib
+
+class SaveThread:
+    
+    def __init__(self):
+        self.lock = threading.Lock()
+
+    def save_nii(self, img, filename):
+        # Create a new thread for saving the NIfTI file
+        thread = threading.Thread(target=self._save, args=(img, filename))
+        thread.start()
+
+    def _save(self, img, filename):
+        # Acquire the lock
+        with self.lock:
+            # Make a copy of the image
+            img_copy = deepcopy(img)
+
+            # Save the NIfTI file
+            nib.save(img_copy, filename)
+            # print(f'Saved NIfTI file to {filename}')
+
+def save_images_as_stacks(args, target_gt,  n_slices_per_out, st,
+                          out_stack_image, out_stack_gt, out_stack_pred, out_stack_idx, out_stack_posZ,
+                          pred_probs, target_data, target_image,
+                          filenames_target, savedir, mode, epc, current_name, affine = np.diag(((0.5, 0.5, 0.5, 1)))):
+    
+    modality = "ct" if target_data[0][0].find("ctslice")>=0 else "mr"
+
+    n_slices_thisbatch = target_image.shape[0]
+    out_stack_image[..., out_stack_posZ:out_stack_posZ+n_slices_thisbatch] = np.transpose(target_image.cpu().numpy()[:,0,...], (1,2,0)) * 10000
+    out_stack_pred [..., out_stack_posZ:out_stack_posZ+n_slices_thisbatch, :] = np.transpose(pred_probs.cpu().detach().numpy(), (2,3,0, 1))
+    out_stack_gt   [..., out_stack_posZ:out_stack_posZ+n_slices_thisbatch] = np.transpose(np.argmax(target_gt.cpu().numpy(), axis=1), (1,2,0))
+
+    assert out_stack_posZ % args.batch_size == 0
+    
+    if out_stack_posZ + args.batch_size < n_slices_per_out:
+      out_stack_posZ = out_stack_posZ + args.batch_size
+    else:
+      if args.infdata =="all":
+        out_stack_path_prefix = os.path.join(savedir, modality + "-" +  mode, current_name + "-" + str(n_slices_per_out * out_stack_idx))
+      else:
+        out_stack_path_prefix = os.path.join(savedir, ( "inf" if args.mode=="makeim" else f"iter{epc:03d}") +"-stack" , modality + "-" +  mode, "stack-" + str(n_slices_per_out * out_stack_idx))
+
+      os.makedirs(os.path.dirname(out_stack_path_prefix), exist_ok=True)
+      st.save_nii(nib.Nifti1Image( np.argmax(out_stack_pred [..., 0:out_stack_posZ+n_slices_thisbatch], axis=3).astype(np.uint8), affine), out_stack_path_prefix+"-pred.nii.gz")
+
+      if epc==0 or args.mode=="train":
+          # images and ground truth are saved only once on evaluation or testing
+          # On training, images and ground-truths are different at each epoch due to shuffling and augmentation
+          st.save_nii(nib.Nifti1Image(out_stack_image[..., 0:out_stack_posZ+n_slices_thisbatch], affine), out_stack_path_prefix+"-image.nii.gz")
+          st.save_nii(nib.Nifti1Image(out_stack_gt   [..., 0:out_stack_posZ+n_slices_thisbatch], affine), out_stack_path_prefix+"-gt.nii.gz")
+          
+      else:
+        source_path_prefix = os.path.join(savedir, ( "inf" if args.mode=="makeim" else f"iter{epc:03d}") + "-stack" , modality + "-" +  mode, "stack-" + str(n_slices_per_out * out_stack_idx))
+        for suffix in (("-image.nii.gz", "-gt.nii.gz")):
+          if os.path.islink(out_stack_path_prefix + suffix):
+              os.unlink(out_stack_path_prefix + suffix)
+          elif os.path.exists(out_stack_path_prefix + suffix):
+              os.remove(out_stack_path_prefix + suffix)
+          os.symlink(os.path.relpath(source_path_prefix + suffix, start=os.path.dirname(out_stack_path_prefix)), out_stack_path_prefix + suffix)
+
+      out_stack_posZ = 0
+      out_stack_idx += 1
+    return out_stack_posZ, out_stack_idx
+
+
+def save_model_with_info(model, model_path, optimizer, epoch, loss_history=None, verbose=True):
+
+    # save model
+    torch.save(model, model_path)
+
+    # save training state
+    state_path = str(model_path).replace(".pkl", "_state.pth")
+    torch.save({
+        'epoch': epoch,
+        'optimizer_state_dict': optimizer.state_dict(),
+        'loss_history': loss_history,
+    }, state_path)
+
+    if verbose:
+      print(f"Model saved to {model_path}, and state saved to {os.path.basename(state_path)}")
 
 
 def setup(args, n_class, dtype) -> Tuple[Any, Any, Any, List[Callable], List[float],List[Callable], List[float], Callable]:
@@ -54,8 +140,7 @@ def setup(args, n_class, dtype) -> Tuple[Any, Any, Any, List[Callable], List[flo
           net = net_class(1, n_class, network=args.monai).type(dtype).to(device)
         else:
           net = net_class(1, n_class).type(dtype).to(device)
-
-        net.apply(weights_init)
+          net.apply(weights_init)
     net.to(device)
     if args.saveim:
         print("WARNING SAVING MASKS at each epc")
@@ -94,7 +179,7 @@ def do_epoch(args, mode: str, net: Any, device: Any, epc: int,
 
     assert mode in ["train", "val"]
     L: int = len(loss_fns)
-    indices = torch.tensor(metric_axis,device=device)
+
     if mode == "train":
         net.train()
         desc = f">> Training   ({epc})"
@@ -112,7 +197,6 @@ def do_epoch(args, mode: str, net: Any, device: Any, epc: int,
     dtype = eval(args.dtype)
 
     all_dices: Tensor = torch.zeros((total_images, C), dtype=dtype, device=device)
-    all_sizes: Tensor = torch.zeros((total_images, C), dtype=dtype, device=device)
     all_sizes: Tensor = torch.zeros((total_images, C), dtype=dtype, device=device)
     all_gt_sizes: Tensor = torch.zeros((total_images, C), dtype=dtype, device=device)
     all_sizes2: Tensor = torch.zeros((total_images, C), dtype=dtype, device=device)
@@ -154,7 +238,37 @@ def do_epoch(args, mode: str, net: Any, device: Any, epc: int,
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         count_losses = 0
+
+        # For nifti outputs of patches
+        def find_smallest_multiple(number, divisor):
+          return number + divisor - (number % divisor) if number % divisor != 0 else number
+        n_slices_per_out = find_smallest_multiple(256, args.batch_size)
+
+        st = SaveThread()
+        out_stack_image = np.zeros((256,  256, n_slices_per_out), dtype=np.int16)
+        out_stack_pred  = np.zeros((256,  256, n_slices_per_out, args.n_class), dtype=np.float32)
+        out_stack_gt    = np.zeros((256,  256, n_slices_per_out), dtype=np.uint8)
+        out_stack_posZ  = 0 
+        out_stack_idx   = 0
+
         for j, target_data in tq_iter:
+            
+            # Preparation for nii outputs
+            tmp_name = ""
+            start_time = time()
+            current_name = target_data[0][0].split("_")[0]
+            name_changed = False
+            if args.infdata == "all" and j > 0:
+                if tmp_name != current_name:
+                    name_changed = True
+                    out_stack_image.fill(0)
+                    out_stack_pred.fill(0)
+                    out_stack_gt.fill(0)
+                    out_stack_posZ = 0
+                    out_stack_idx = 0
+            tmp_name = deepcopy(current_name)
+
+            # Actual process
             target_data[1:] = [e.to(device) for e in target_data[1:]]  # Move all tensors to device
             filenames_target, target_image, target_gt = target_data[:3]
             labels = target_data[3:3+L]
@@ -162,10 +276,12 @@ def do_epoch(args, mode: str, net: Any, device: Any, epc: int,
             filenames_target = [f.split('.nii')[0] for f in filenames_target]
             assert len(labels) == len(bounds), len(bounds)
             B = len(target_image)
+
             # Reset gradients
             if optimizer:
                 #adjust_learning_rate(optimizer, 1, args.l_rate, args.power)
                 optimizer.zero_grad()
+
             # Forward
             with torch.set_grad_enabled(mode == "train"):
                 pred_logits: Tensor = net(target_image)
@@ -193,10 +309,12 @@ def do_epoch(args, mode: str, net: Any, device: Any, epc: int,
                         loss = w*loss
                         loss_1 = loss
                     loss_kw.append(loss_1.detach())
+
            # Backward
             if optimizer:
                 loss.backward()
                 optimizer.step()
+                
             # Compute and log metrics
             dices, inter_card, card_gt, card_pred = dice_coef(predicted_mask.detach(), target_gt.detach())
             assert dices.shape == (B, C), (dices.shape, B, C)
@@ -219,7 +337,6 @@ def do_epoch(args, mode: str, net: Any, device: Any, epc: int,
             
             if 'slice' in args.grp_regex:
                 all_grp[sm_slice, ...] = torch.FloatTensor([int(re.split('_',re.split('slice',x)[1])[0]) for x in filenames_target]).unsqueeze(1).repeat(1,C)
-                #all_grp[sm_slice, ...] = torch.FloatTensor([int(re.split('_',re.split('Subj',x)[1])[0]) for x in filenames_target]).unsqueeze(1).repeat(1,C)
             elif 'Case' in args.grp_regex:
                 all_grp[sm_slice, ...] = torch.FloatTensor([int(re.split('_',re.split('Case',x)[1])[0]) for x in filenames_target]).unsqueeze(1).repeat(1,C)
             else:
@@ -238,16 +355,23 @@ def do_epoch(args, mode: str, net: Any, device: Any, epc: int,
             else:
             	loss_cons[sm_slice] = 0
             	loss_tot[sm_slice] = loss_kw[0]
-            # Save images
-            if savedir and args.saveim and mode =="val":
+                
+            # Save images as stacks
+            if savedir and (args.saveim or
+                            (mode=="val"   and (epc == 0 or epc % 5 == 0) or
+                            (mode=="train" and (epc == 0 or epc % 5 == 0) and out_stack_idx == 0 ))):
                 with warnings.catch_warnings():
                     warnings.filterwarnings("ignore", category=UserWarning)
                     warnings.simplefilter("ignore") 
                     predicted_class: Tensor = probs2class(pred_probs)
-                    save_images(predicted_class, filenames_target, savedir, mode, epc, False)
+                    # save_images(predicted_class, filenames_target, savedir, mode, epc, False)
+                    out_stack_posZ, out_stack_idx = save_images_as_stacks(args, target_gt,  n_slices_per_out, st, out_stack_image, out_stack_gt, out_stack_pred, out_stack_idx, out_stack_posZ, pred_probs, target_data, target_image, filenames_target, savedir, mode, epc, current_name)
+
                     if args.entmap:
                         ent_map = torch.einsum("bcwh,bcwh->bwh", [-pred_probs, (pred_probs+1e-10).log()])
                         save_images_ent(ent_map, filenames_target, savedir,'ent_map', epc)
+
+
             # Logging
             big_slice = slice(0, done + B)  # Value for current and previous batches
             stat_dict = {**{f"DSC{n}": all_dices[big_slice, n].mean() for n in metric_axis},
@@ -265,6 +389,8 @@ def do_epoch(args, mode: str, net: Any, device: Any, epc: int,
     if args.dice_3d and (mode == 'val'):
         dice_3d_log, dice_3d_sd_log, asd_3d_log, asd_3d_sd_log, hd_3d_log, hd_3d_sd_log = dice3d(all_grp, all_inter_card, all_card_gt, all_card_pred,all_pred,all_gt,all_pnames,metric_axis,args.pprint,args.do_hd, best_dice3d_val)
           
+    # Compute and log metrics for classes specified in metric_axis ("indices" as Tensor)
+    indices = torch.tensor(metric_axis,device=device)
     dice_2d = torch.index_select(all_dices, 1, indices).mean().cpu().numpy()
     target_vec = [ dice_3d_log, dice_3d_sd_log,hd95_3d_log,hd95_3d_sd_log,dice_2d]
     size_mean = torch.index_select(all_sizes2, 1, indices).mean(dim=0).cpu().numpy()
@@ -274,6 +400,7 @@ def do_epoch(args, mode: str, net: Any, device: Any, epc: int,
     size_mean_pos = torch.index_select(all_sizes2, 1, indices).sum(dim=0).cpu().numpy()/mask_pos.sum(dim=0).cpu().numpy()
     gt_size_mean_pos = torch.index_select(all_gt_sizes, 1, indices).sum(dim=0).cpu().numpy()/gt_pos.sum(dim=0).cpu().numpy()
     size_mean2 = torch.index_select(all_sizes2, 1, indices).mean(dim=0).cpu().numpy()
+
     try:
       losses_vec = [np.nanmean(loss_se.cpu().numpy()),np.nanmean(loss_cons.cpu().numpy()), np.nanmean(loss_tot.cpu().numpy()), np.int32(np.nanmean(size_mean)), np.int32(np.nanmean(size_mean_pos)), np.int32(np.nanmean(size_gt_mean)), np.int32(np.nanmean(gt_size_mean_pos)) ]
     except Exception as exc:
@@ -285,9 +412,11 @@ def do_epoch(args, mode: str, net: Any, device: Any, epc: int,
            "val_ids":all_pnames,
            "proposal_size":all_sizes2.cpu().numpy().tolist()})
         df_t.to_csv(Path(savedir,mode+str(epc)+"sizes.csv"), float_format="%.4f", index_label="epoch")
+
     return losses_vec, target_vec,source_vec
 
 def run(args: argparse.Namespace) -> None:
+    
     d = vars(args)
     d['time'] = str(datetime.datetime.now())
     d['server']=platform.node()
@@ -307,47 +436,46 @@ def run(args: argparse.Namespace) -> None:
                                            args.debug, args.in_memory, dtype, shuffle, "target", args.val_target_folders)
 
     print("metric axis",metric_axis)
-    best_dice_pos: Tensor = np.zeros(1)
-    best_dice: Tensor = np.zeros(1)
-    best_hd3d_dice: Tensor = np.zeros(1)
-    best_3d_dice: Tensor = 0 
-    best_2d_dice: Tensor = 0 
+    best_dice_pos, best_dice, best_hd3d_dice = np.zeros(1), np.zeros(1), np.zeros(1)
+    best_3d_dice = best_2d_dice = 0
     print("Results saved in ", savedir)
     print(">>> Starting the training")
     for i in range(n_epoch):
 
        if args.mode =="makeim":
             with torch.no_grad():
-                 
-                val_losses_vec, val_target_vec,val_source_vec                                        = do_epoch(args, "val", net, device,
-                                                                                                i, loss_fns,
-                                                                                               loss_weights,
-                                                                                               args.resize,
-                                                                                                n_class,metric_axis,
-                                                                                               savedir=savedir,
-                                                                                               target_loader=target_loader_val, best_dice3d_val=best_3d_dice)
+                val_losses_vec, val_target_vec,val_source_vec = do_epoch(
+                    args, "val", net, device, i, loss_fns,
+                    loss_weights,
+                    args.resize,
+                    n_class,metric_axis,
+                    savedir=savedir,
+                    target_loader=target_loader_val, best_dice3d_val=best_3d_dice)
                 
                 tra_losses_vec = val_losses_vec
                 tra_target_vec = val_target_vec
                 tra_source_vec = val_source_vec
        else:
             if True: # Set False to debug validation phase
-              tra_losses_vec, tra_target_vec,tra_source_vec                                    = do_epoch(args, "train", net, device,
-                                                                                           i, loss_fns,
-                                                                                           loss_weights,
-                                                                                           args.resize,
-                                                                                           n_class, metric_axis,
-                                                                                           savedir=savedir,
-                                                                                           optimizer=optimizer,
-                                                                                           target_loader=target_loader, best_dice3d_val=best_3d_dice)
+              tra_losses_vec, tra_target_vec,tra_source_vec    = do_epoch(
+                  args, "train", net, device,
+                  i, loss_fns,
+                  loss_weights,
+                  args.resize,
+                  n_class, metric_axis,
+                  savedir=savedir,
+                  optimizer=optimizer,
+                  target_loader=target_loader, best_dice3d_val=best_3d_dice)
             with torch.no_grad():
-                val_losses_vec, val_target_vec,val_source_vec                                        = do_epoch(args, "val", net, device,
-                                                                                               i, loss_fns,
-                                                                                               loss_weights,
-                                                                                               args.resize,
-                                                                                               n_class,metric_axis,
-                                                                                               savedir=savedir,
-                                                                                               target_loader=target_loader_val, best_dice3d_val=best_3d_dice)
+                val_losses_vec, val_target_vec,val_source_vec = do_epoch(
+                    args, "val", net, device,
+                    i, loss_fns,
+                    loss_weights,
+                    args.resize,
+                    n_class,metric_axis,
+                    savedir=savedir,
+                    target_loader=target_loader_val, best_dice3d_val=best_3d_dice)
+                
        current_val_target_2d_dice = val_target_vec[4]
        current_val_target_3d_dice = val_target_vec[0]
        if args.dice_3d:
@@ -361,23 +489,35 @@ def run(args: argparse.Namespace) -> None:
                     rmtree(best_folder_3d)
                if args.saveim:
                     copytree(Path(savedir, f"iter{i:03d}"), Path(best_folder_3d))
-           torch.save(net, Path(savedir, "best_3d.pkl"))
-       if not(i % 10) :
+           # torch.save(net, Path(savedir, "best_3d.pkl"))
+           save_model_with_info(net, Path(savedir, "best_3d.pkl"), optimizer, i, [tra_losses_vec, val_losses_vec])
+
+       if i == 0 or (i+1) % 5 :
             print("epoch",str(i),savedir,'best 3d dice',best_3d_dice)
-            torch.save(net, Path(savedir, "epoch_"+str(i)+".pkl"))
+            # torch.save(net, Path(savedir, "epoch_"+str(i)+".pkl"))
+            save_model_with_info(net, Path(savedir, "epoch_"+str(i+1)+".pkl"), optimizer, i, [tra_losses_vec, val_losses_vec])
+            
        if i == n_epoch - 1:
             with open(Path(savedir, "last_epoch.txt"), 'w') as f:
                 f.write(str(i))
             last_folder = Path(savedir, "last_epoch")
             if last_folder.exists():
-                rmtree(last_folder)
+                try:
+                    rmtree(last_folder)
+                except Exception as exc:
+                    print(exc)
             if args.saveim:
-                copytree(Path(savedir, f"iter{i:03d}"), Path(last_folder))
-            torch.save(net, Path(savedir, "last.pkl"))
+                try:
+                  copytree(Path(savedir, f"iter{i:03d}"), Path(last_folder))
+                except Exception as exc:
+                    print(exc)
+            # torch.save(net, Path(savedir, "last.pkl"))
+            save_model_with_info(net, Path(savedir, "last.pkl"), optimizer, i, [tra_losses_vec, val_losses_vec])
 
         # remove images from iteration
        if args.saveim:
-           rmtree(Path(savedir, f"iter{i:03d}"))
+           # rmtree(Path(savedir, f"iter{i:03d}"))
+           pass
 
        try:
         df_t_tmp = pd.DataFrame({
@@ -436,9 +576,9 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--valonly", action="store_true")
     parser.add_argument("--flr", action="store_true")
     parser.add_argument("--augment", action="store_true")
-    parser.add_argument("--mix", type=bool, default=True)
-    parser.add_argument("--do_hd", type=bool, default=False)
-    parser.add_argument("--saveim", type=bool, default=False)
+    parser.add_argument("--mix", type=bool, default=True) # dangerous
+    parser.add_argument("--do_hd", action="store_true")
+    parser.add_argument("--saveim", action="store_true")
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--csv", type=str, default='metrics.csv')
     parser.add_argument("--source_metrics", action="store_true")
@@ -471,6 +611,7 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--power",type=float, default=0.9)
     parser.add_argument("--metric_axis",type=int, nargs='*', required=True, help="Classes to display metrics. \
         Display only the average of everything if empty")
+    parser.add_argument("--infdata", type=str, default="train", choices=["train", "general", "all"], help="train: non-inference mode. general: training and validation dataset. all: images that can reconstruct original nii")
     args = parser.parse_args()
     print(args)
 

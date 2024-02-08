@@ -51,6 +51,16 @@ class monai(nn.Module):
             out_channels=out_channels,
             norm='BATCH',
           )
+
+        elif network.lower() == "unetr":
+           from monai.networks.nets import UNETR
+           self.model = UNETR(
+                img_size=img_size,  # 画像のサイズ
+                in_channels=in_channels,       # 入力チャネル数
+                out_channels=out_channels,      # 出力チャネル数 (クラス数)
+                spatial_dims=2,      # 空間次元数を2Dに設定
+                feature_size=16
+            )
         
         elif network.lower() == "swinunetr":
            from monai.networks.nets import SwinUNETR
@@ -59,9 +69,10 @@ class monai(nn.Module):
                 in_channels=in_channels,       # 入力チャネル数
                 out_channels=out_channels,      # 出力チャネル数 (クラス数)
                 spatial_dims=2,      # 空間次元数を2Dに設定
-                feature_size=48,     # 特徴サイズ
-                # 他のパラメータは必要に応じて設定
+                feature_size=24,     # 特徴サイズ
+                use_checkpoint=False
             )
+           
         elif network.lower() == "unetpp":
             from monai.networks.nets import BasicUNetPlusPlus
             self.model = BasicUNetPlusPlus(
@@ -79,7 +90,9 @@ class monai(nn.Module):
         else:
           raise NotImplementedError("Network not implemented")
         
-        export_for_netron(self.model, (1, 1, img_size[0], img_size[1]), "netron", "monai-" + network + "-nLayer" + str(n_layers) +  ".onnx")
+        if network.lower() != "swinunetr":
+          export_for_netron(self.model, (1, 1, img_size[0], img_size[1]), "netron", "monai-" + network + "-nLayer" + str(n_layers) +  ".onnx")
+
         print("n_parameters:", count_parameters(self.model))
         self.model = self.model.to(device)
 

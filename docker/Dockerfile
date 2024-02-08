@@ -11,13 +11,12 @@ RUN pip install nibabel==4.0.1 numpy==1.20.0 pandas==1.1.0
 RUN pip install --upgrade scikit-learn SimpleITK
 RUN pip install kornia
 RUN pip install cupy-cuda110
-RUN pip install monai-weekly
 RUN apt-get -y update
 RUN pip install torchviz opencv-python
 RUN DEBIAN_FRONTEND=noninteractive apt-get install -y graphviz
 RUN pip install h5py
 RUN pip install --upgrade torchvision
 RUN pip install nnunet
-RUN pip install onnx
+RUN pip install onnx einops monai
 ENV CUDA_DEVICE_ORDER="PCI_BUS_ID"
 
