@@ -83,7 +83,7 @@ def save_images_as_stacks(args, target_gt,  n_slices_per_out, st,
       os.makedirs(os.path.dirname(out_stack_path_prefix), exist_ok=True)
       st.save_nii(nib.Nifti1Image( np.argmax(out_stack_pred [..., 0:out_stack_posZ+n_slices_thisbatch], axis=3).astype(np.uint8), affine), out_stack_path_prefix+"-pred.nii.gz")
 
-      if epc==0 or args.mode=="train":
+      if epc==0 or mode=="train":
           # images and ground truth are saved only once on evaluation or testing
           # On training, images and ground-truths are different at each epoch due to shuffling and augmentation
           st.save_nii(nib.Nifti1Image(out_stack_image[..., 0:out_stack_posZ+n_slices_thisbatch], affine), out_stack_path_prefix+"-image.nii.gz")
@@ -128,11 +128,17 @@ def setup(args, n_class, dtype) -> Tuple[Any, Any, Any, List[Callable], List[flo
     device = torch.device("cpu") if cpu else torch.device("cuda")
     n_epoch = args.n_epoch
     if args.model_weights:
-        if cpu:
-            net = torch.load(args.model_weights, map_location='cpu')
+        net = torch.load(args.model_weights, map_location='cpu') if cpu else  torch.load(args.model_weights)
+
+        # Check if the corresponding state file exists
+        state_file_path = args.model_weights.replace(".pkl", "_state.pth")
+        if os.path.exists(state_file_path):
+            state = torch.load(state_file_path, map_location=device if cpu else None)
+            print(f"{state_file_path} found and loaded.")
         else:
-            net = torch.load(args.model_weights)
+            state = None
     else:
+        state = None
         net_class = getattr(__import__('networks'), args.network)
 
         if args.network == "monai":
@@ -148,6 +154,19 @@ def setup(args, n_class, dtype) -> Tuple[Any, Any, Any, List[Callable], List[flo
     optimizer = torch.optim.Adam(net.parameters(), lr=args.l_rate, betas=(0.9, 0.999),weight_decay=args.weight_decay)
     if args.adamw:
         optimizer = torch.optim.AdamW(net.parameters(), lr=args.l_rate, betas=(0.9, 0.999))
+    
+    if state is not None:
+      optimizer.load_state_dict(state['optimizer_state_dict'])
+      print("Optimizer state loaded.")
+      
+      start_epoch = state['epoch'] + 1
+      print("Training will start from epoch", start_epoch)
+      
+      loss_history = state['loss_history'] # currently not used
+    
+    else:
+      start_epoch = 0
+      loss_history = None
 
     print(args.target_losses)
     losses = eval(args.target_losses)
@@ -169,7 +188,7 @@ def setup(args, n_class, dtype) -> Tuple[Any, Any, Any, List[Callable], List[flo
     else:
         scheduler = ''
 
-    return net, optimizer, device, loss_fns, loss_weights, scheduler, n_epoch
+    return net, optimizer, device, loss_fns, loss_weights, scheduler, n_epoch, start_epoch, loss_history
 
 
 def do_epoch(args, mode: str, net: Any, device: Any, epc: int,
@@ -428,7 +447,10 @@ def run(args: argparse.Namespace) -> None:
     dtype = eval(args.dtype)
     savedir: str = args.workdir
     n_epoch: int = args.n_epoch
-    net, optimizer, device, loss_fns, loss_weights, scheduler, n_epoch = setup(args, n_class, dtype)
+
+    net, optimizer, device, loss_fns, loss_weights, scheduler, n_epoch, start_epoch, loss_history = setup(args, n_class, dtype)
+    # currently loss_history is not used
+
     shuffle = True
     print(args.target_folders)
     target_loader, target_loader_val = get_loaders(args, args.target_dataset,args.target_folders,
@@ -438,9 +460,11 @@ def run(args: argparse.Namespace) -> None:
     print("metric axis",metric_axis)
     best_dice_pos, best_dice, best_hd3d_dice = np.zeros(1), np.zeros(1), np.zeros(1)
     best_3d_dice = best_2d_dice = 0
-    print("Results saved in ", savedir)
+    print("Results will be saved in ", savedir)
+
+
     print(">>> Starting the training")
-    for i in range(n_epoch):
+    for i in range(start_epoch, n_epoch):
 
        if args.mode =="makeim":
             with torch.no_grad():
@@ -492,7 +516,7 @@ def run(args: argparse.Namespace) -> None:
            # torch.save(net, Path(savedir, "best_3d.pkl"))
            save_model_with_info(net, Path(savedir, "best_3d.pkl"), optimizer, i, [tra_losses_vec, val_losses_vec])
 
-       if i == 0 or (i+1) % 5 :
+       if i == 0 or (i+1) % 5 == 0:
             print("epoch",str(i),savedir,'best 3d dice',best_3d_dice)
             # torch.save(net, Path(savedir, "epoch_"+str(i)+".pkl"))
             save_model_with_info(net, Path(savedir, "epoch_"+str(i+1)+".pkl"), optimizer, i, [tra_losses_vec, val_losses_vec])
