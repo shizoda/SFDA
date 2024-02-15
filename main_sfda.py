@@ -78,7 +78,8 @@ def save_images_as_stacks(args, target_gt,  n_slices_per_out, st,
       if args.infdata =="all":
         out_stack_path_prefix = os.path.join(savedir, modality + "-" +  mode, current_name + "-" + str(n_slices_per_out * out_stack_idx))
       else:
-        out_stack_path_prefix = os.path.join(savedir, ( "inf" if args.mode=="makeim" else f"iter{epc:03d}") +"-stack" , modality + "-" +  mode, "stack-" + str(n_slices_per_out * out_stack_idx))
+        model_name = args.model_weights.split("/")[-1].replace(".pkl", "")
+        out_stack_path_prefix = os.path.join(savedir, ( "inf" if args.mode=="makeim" else f"iter{epc:03d}" + "-" + model_name) +"-stack" , modality + "-" +  mode, "stack-" + str(n_slices_per_out * out_stack_idx))
 
       os.makedirs(os.path.dirname(out_stack_path_prefix), exist_ok=True)
       st.save_nii(nib.Nifti1Image( np.argmax(out_stack_pred [..., 0:out_stack_posZ+n_slices_thisbatch], axis=3).astype(np.uint8), affine), out_stack_path_prefix+"-pred.nii.gz")
@@ -155,7 +156,7 @@ def setup(args, n_class, dtype) -> Tuple[Any, Any, Any, List[Callable], List[flo
     if args.adamw:
         optimizer = torch.optim.AdamW(net.parameters(), lr=args.l_rate, betas=(0.9, 0.999))
     
-    if state is not None:
+    if state is not None and args.resume==True:
       optimizer.load_state_dict(state['optimizer_state_dict'])
       print("Optimizer state loaded.")
       
@@ -377,8 +378,8 @@ def do_epoch(args, mode: str, net: Any, device: Any, epc: int,
                 
             # Save images as stacks
             if savedir and (args.saveim or
-                            (mode=="val"   and (epc == 0 or epc % 5 == 0) or
-                            (mode=="train" and (epc == 0 or epc % 5 == 0) and out_stack_idx == 0 ))):
+                            (mode=="val"   and (epc == 0 or (epc+1) % 5 == 0) or
+                            (mode=="train" and (epc == 0 or (epc+1) % 5 == 0) and out_stack_idx == 0 ))):
                 with warnings.catch_warnings():
                     warnings.filterwarnings("ignore", category=UserWarning)
                     warnings.simplefilter("ignore") 
@@ -427,6 +428,11 @@ def do_epoch(args, mode: str, net: Any, device: Any, epc: int,
       losses_vec = [0,0,0,0,0,0,0]
       pdb.set_trace()
     if not epc%10:
+        try:
+          df_t # check existence
+        except:
+          df_t = pd.DataFrame(columns=["val_ids", "proposal_size"])
+
         df_t = pd.DataFrame({
            "val_ids":all_pnames,
            "proposal_size":all_sizes2.cpu().numpy().tolist()})
@@ -567,7 +573,7 @@ def run(args: argparse.Namespace) -> None:
            pdb.set_trace()
 
 
-       if i == 0:
+       if i == start_epoch:
             df_t = df_t_tmp
        else:
             df_t = df_t.append(df_t_tmp)
@@ -616,6 +622,7 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--model_weights", type=str, default='')
     parser.add_argument("--cpu", action='store_true')
     parser.add_argument("--in_memory", action='store_true')
+    parser.add_argument("--resume", action='store_true')
     parser.add_argument("--resize", type=int, default=0)
     parser.add_argument("--pho", nargs='?', type=float, default=1,
                         help='augment')

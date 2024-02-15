@@ -139,7 +139,7 @@ def get_loaders(args, data_folder: str, subfolders:str,
                           bounds_generators=bounds_generators)
 
     data_loader = partial(DataLoader,
-                          num_workers=int(cpu_count()/2)-1,
+                          num_workers=int(cpu_count()/2)-2,
                           #num_workers=min(cpu_count(), batch_size + 4),
                           #num_workers=1,
                           pin_memory=True)
@@ -225,6 +225,8 @@ class SliceDataset(Dataset):
             hdf5_file = Path(folder, "allfiles.h5")
             self.use_hdf5[folder] = hdf5_file.exists()
             from termcolor import cprint; cprint(f"Using HDF5: {self.use_hdf5[folder]} for {os.path.basename(folder)}", "cyan")
+            if self.use_hdf5[folder]:
+                print(hdf5_file)
 
         print(f"Initialized {self.__class__.__name__} with {len(self.filenames)} images")
 
@@ -272,7 +274,12 @@ class SliceDataset(Dataset):
 
             if use_hdf5:
                 with h5py.File(Path(folder, "allfiles.h5"), 'r') as h5f:
-                    image_data = h5f[filename][()]
+                    try:
+                      image_data = h5f[filename][()]
+                    except Exception as exc:
+                      cprint(exc, "red")
+                      print(filename, folder)
+                      import sys; sys.exit()
                 images.append(image_data)
             else:
                 if path_name.suffix == ".png":

@@ -18,5 +18,6 @@ RUN pip install h5py
 RUN pip install --upgrade torchvision
 RUN pip install nnunet
 RUN pip install onnx einops monai
+RUN apt-get install -y hdf5-tools
 ENV CUDA_DEVICE_ORDER="PCI_BUS_ID"
 

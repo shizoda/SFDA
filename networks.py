@@ -59,7 +59,10 @@ class monai(nn.Module):
                 in_channels=in_channels,       # 入力チャネル数
                 out_channels=out_channels,      # 出力チャネル数 (クラス数)
                 spatial_dims=2,      # 空間次元数を2Dに設定
-                feature_size=16
+                feature_size=16,
+                hidden_size=int(768/4),
+                mlp_dim=int(3072/4),
+                num_heads=int(12/4),
             )
         
         elif network.lower() == "swinunetr":
@@ -79,7 +82,11 @@ class monai(nn.Module):
                 spatial_dims=2,
                 in_channels=in_channels,
                 out_channels=out_channels,
-                features=(16, 32, 64, 128, 256, 16),
+                # https://docs.monai.io/en/stable/networks.html#basicunetplusplus
+                # features: six integers as numbers of features. Defaults to (32, 32, 64, 128, 256, 32),
+                # the first five values correspond to the five-level encoder feature sizes.
+                # the last value corresponds to the feature size after the last upsampling.
+                features=(16, 16, 32, 64, 128, 16),
                 deep_supervision=False,
                 act=('LeakyReLU', {'inplace': True, 'negative_slope': 0.1}),
                 norm=('instance', {'affine': True}),
