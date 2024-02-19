@@ -15,6 +15,73 @@ from scipy.ndimage import generate_binary_structure, generic_filter
 from collections import Counter
 from scipy.ndimage import binary_closing, generate_binary_structure, binary_fill_holes
 from termcolor import colored, cprint
+import pandas as pd
+
+
+def evaluate_segmentation(output_array, gt_array, filename, n_classes=5):
+    """
+    Updated evaluation function that also calculates and includes mean metrics for precision, recall, and dice score,
+    along with individual class metrics, all rounded to 3 decimal places.
+
+    Args:
+    - output_array (np.array): The segmentation result, a numpy array of shape (H, W, D) and type np.uint8.
+    - gt_array (np.array): The ground truth segmentation, a numpy array of shape (H, W, D) and type np.uint8.
+    - filename (str): The filename for the image being evaluated.
+    - n_classes (int): Number of classes including background.
+
+    Returns:
+    - pd.DataFrame: A dataframe with the evaluation results, including individual class metrics and mean metrics.
+    """
+    # Initialize dictionaries to hold TP, FP, FN, and metrics for each class
+    metrics = {f"Class{i}-{metric}": 0 for i in range(1, n_classes + 1) for metric in ["TP", "FP", "FN", "Prec", "Recall", "Dice"]}
+    precisions = []
+    recalls = []
+    dices = []
+
+    # Calculate metrics for each class
+    for i in range(n_classes):
+        tp = np.sum((output_array == i) & (gt_array == i))
+        fp = np.sum((output_array == i) & (gt_array != i))
+        fn = np.sum((output_array != i) & (gt_array == i))
+        
+        precision = round(tp / (tp + fp) if tp + fp > 0 else 0, 3)
+        recall = round(tp / (tp + fn) if tp + fn > 0 else 0, 3)
+        dice = round((2 * tp) / (2 * tp + fp + fn) if (2 * tp + fp + fn) > 0 else 0, 3)
+        
+        # Update metrics dictionary
+        metrics[f"Class{i+1}-TP"] = tp
+        metrics[f"Class{i+1}-FP"] = fp
+        metrics[f"Class{i+1}-FN"] = fn
+        metrics[f"Class{i+1}-Prec"] = precision
+        metrics[f"Class{i+1}-Recall"] = recall
+        metrics[f"Class{i+1}-Dice"] = dice
+        
+        # Append class metrics for calculating means
+        precisions.append(precision)
+        recalls.append(recall)
+        dices.append(dice)
+
+    # Calculate and add mean metrics
+    metrics["Mean-Prec"] = round(np.mean(precisions), 3)
+    metrics["Mean-Recall"] = round(np.mean(recalls), 3)
+    metrics["Mean-Dice"] = round(np.mean(dices), 3)
+    metrics['Filename'] = filename
+
+    # Create DataFrame from metrics dictionary
+    df = pd.DataFrame([metrics])
+
+    # Order columns
+    ordered_cols = ['Filename'] + sorted([col for col in df.columns if col != 'Filename'], key=lambda x: (x.split('-')[0], x.split('-')[1]))
+    df = df[ordered_cols]
+
+    return df
+
+# Note: This example assumes that 'output_array', 'gt_array', and 'filename' are defined. 
+# Replace 'output_array', 'gt_array', "example_filename", and 'n_classes' with actual values to use this function.
+# df = evaluate_segmentation_with_averages_updated(output_array, gt_array, "example_filename", n_classes=5)
+# print(df)
+
+
 
 def calculate_sizes(input_dir, filename, num_classes, verbose=True):
     
@@ -167,7 +234,7 @@ def postprocess(prediction, size_reference, window_size=3):
     return weighted_median_filter(prediction, weights, footprint)
 
 
-def process_file(file_path, model, modal, output_dir, device, args, sliding_window=False, patch_size=(256, 256), stride=(192, 192), num_classes=8, ideal_size_file = None):
+def process_file(file_path, model, modal, output_dir, device, args, sliding_window=False, patch_size=(256, 256), stride=(192, 192), num_classes=5, ideal_size_file = None):
     
     # load image
     img_nii = nib.load(file_path)
@@ -274,11 +341,22 @@ def process_file(file_path, model, modal, output_dir, device, args, sliding_wind
 
     # label_path = file_path.replace('_image.nii.gz', '_gt.nii.gz')
     label_path = file_path.replace('image', 'gth')
+
     if os.path.exists(label_path):
         label_nii = nib.load(label_path)
-        label_nii = nib.as_closest_canonical(label_nii)
+        # label_nii = nib.as_closest_canonical(label_nii)
+
+        label_arr = np.array(label_nii.dataobj).astype(np.uint8)
+        
+        # label_arr = np.transpose(label_arr, (1, 2, 0))
+        label_arr = label_arr[::-1, ::-1, :]  # flip the image in the x and y axes to match training patches
         label_reso = label_nii.header.get_zooms()
-        nib.save(nib.Nifti1Image(np.array(label_nii.dataobj), out_affine), label_path)
+        nib.save(nib.Nifti1Image(label_arr, out_affine), os.path.join(output_dir, osp.basename(file_path).replace('.nii.gz', '_gt.nii.gz')))
+
+        eval = evaluate_segmentation(output_array, label_arr, filename=os.path.basename(file_path), n_classes=num_classes)
+        return eval                          
+    else:
+        return None
 
     # create symbolic links
     '''
@@ -344,10 +422,31 @@ def main():
     input_files = [f for f in input_files if f.find("gth")<0 and f.find("label")<0]
 
     pbar = tqdm(input_files, unit="file")
+
+    scores = []
     for file_path in pbar:
         # pbar.set_description(f"Processing {file_path}")
-        process_file(file_path, model, args.modal, args.output, device,args, ideal_size_file=args.sizeref, sliding_window=args.sliding_window)
+        score = process_file(file_path, model, args.modal, args.output, device,args, ideal_size_file=args.sizeref, sliding_window=args.sliding_window)
+        scores.append(score)
     pbar.close()
+
+    # save scores to csv
+    scores = pd.concat(scores, ignore_index=True)
+    
+    scores = scores.dropna() # remove None from scores
+    if len(scores) > 0:
+      scores.to_csv(osp.join(args.output, "scores.csv"), index=False)
+      mean_values = scores.mean()
+      std_dev_values = scores.std()
+
+      # Create rows for mean and standard deviation, with 'Filename' set to '(Mean)' and '(StdDev)', respectively
+      mean_row = pd.Series(["(Mean)"] + list(mean_values), index=scores.columns)
+      std_dev_row = pd.Series(["(StdDev)"] + list(std_dev_values), index=scores.columns)
+
+      # Append these rows to the DataFrame
+      scores = scores.append(mean_row, ignore_index=True)
+      scores = scores.append(std_dev_row, ignore_index=True)
+
 
 if __name__ == "__main__":
     main()

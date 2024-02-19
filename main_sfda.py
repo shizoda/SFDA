@@ -128,6 +128,7 @@ def setup(args, n_class, dtype) -> Tuple[Any, Any, Any, List[Callable], List[flo
         print("WARNING CUDA NOT AVAILABLE")
     device = torch.device("cpu") if cpu else torch.device("cuda")
     n_epoch = args.n_epoch
+
     if args.model_weights:
         net = torch.load(args.model_weights, map_location='cpu') if cpu else  torch.load(args.model_weights)
 
@@ -138,6 +139,21 @@ def setup(args, n_class, dtype) -> Tuple[Any, Any, Any, List[Callable], List[flo
             print(f"{state_file_path} found and loaded.")
         else:
             state = None
+        
+        # Fixation of some weights on adaptation
+        if args.network == "monai" and args.fixlayers:
+          fixed_layers = ()
+
+          if args.monai == "unetpp":
+            fixed_layers = ('upcat_0_4', 'upcat_1_3', 'upcat_2_2', 'upcat_3_1', 'final_conv_0_4', 'final_conv_1_3', 'final_conv_2_2', 'final_conv_3_1')
+
+          cprint("Fixed layers: ", "red", end=" ")
+          for name, param in net.named_parameters():
+              if np.sum([int(name.find(x)>0) for x in fixed_layers]) > 0:
+                  print(name, end=", ")
+                  param.requires_grad = False
+          print()
+        
     else:
         state = None
         net_class = getattr(__import__('networks'), args.network)
@@ -162,7 +178,7 @@ def setup(args, n_class, dtype) -> Tuple[Any, Any, Any, List[Callable], List[flo
       
       start_epoch = state['epoch'] + 1
       print("Training will start from epoch", start_epoch)
-      
+
       loss_history = state['loss_history'] # currently not used
     
     else:
@@ -615,6 +631,7 @@ def get_args() -> argparse.Namespace:
     parser.add_argument("--adamw", action="store_true")
     parser.add_argument("--dice_3d", action="store_true")
     parser.add_argument("--ontest", action="store_true")
+    parser.add_argument("--fixlayers", action="store_true")
     parser.add_argument("--ontrain", action="store_true")
     parser.add_argument("--best_losses", action="store_true")
     parser.add_argument("--pprint", action="store_true")

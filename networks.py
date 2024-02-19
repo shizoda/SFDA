@@ -38,9 +38,9 @@ class monai(nn.Module):
               spatial_dims=2,
               in_channels=in_channels,
               out_channels=out_channels,
-              channels=tuple(nG * (2 ** i) for i in range(n_layers)),  # チャンネル数を動的に設定
-              strides=(2,) * (n_layers - 1),  # ストライドを層の数に合わせる
-              num_res_units=2,  # 残差ユニットは使用しない
+              channels=tuple(nG * (2 ** i) for i in range(n_layers)), 
+              strides=(2,) * (n_layers - 1),
+              num_res_units=1,
               norm='BATCH',
           )
           
