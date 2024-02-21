@@ -592,7 +592,8 @@ def run(args: argparse.Namespace) -> None:
        if i == start_epoch:
             df_t = df_t_tmp
        else:
-            df_t = df_t.append(df_t_tmp)
+            # df_t = df_t.append(df_t_tmp)
+            df_t = pd.concat([df_t, df_t_tmp], ignore_index=True)
 
        df_t.to_csv(Path(savedir, "_".join((args.target_folders.split("'")[1],"target", args.csv))), float_format="%.4f", index=False)
 
