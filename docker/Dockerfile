@@ -21,5 +21,6 @@ RUN pip install onnx einops monai
 RUN apt-get install -y hdf5-tools
 RUN pip install pycocotools onnxruntime onnx requests
 RUN pip install git+https://github.com/facebookresearch/segment-anything.git
+RUN pip install antspyx
 ENV CUDA_DEVICE_ORDER="PCI_BUS_ID"
 

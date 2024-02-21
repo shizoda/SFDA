@@ -434,18 +434,19 @@ def main():
     scores = pd.concat(scores, ignore_index=True)
     
     scores = scores.dropna() # remove None from scores
+    '''
     if len(scores) > 0:
-      scores.to_csv(osp.join(args.output, "scores.csv"), index=False)
-      mean_values = scores.mean()
-      std_dev_values = scores.std()
-
       # Create rows for mean and standard deviation, with 'Filename' set to '(Mean)' and '(StdDev)', respectively
-      mean_row = pd.Series(["(Mean)"] + list(mean_values), index=scores.columns)
-      std_dev_row = pd.Series(["(StdDev)"] + list(std_dev_values), index=scores.columns)
+      mean_row = pd.Series(["(Mean)"] + list(scores.mean()), index=scores.columns)
+      std_dev_row = pd.Series(["(StdDev)"] + list(scores.std()), index=scores.columns)
+      min_row = pd.Series(["(Min)"] + list(scores.min())[1:], index=scores.columns)
+      max_row = pd.Series(["(Max)"] + list(scores.max())[1:], index=scores.columns)
 
       # Append these rows to the DataFrame
-      scores = scores.append(mean_row, ignore_index=True)
-      scores = scores.append(std_dev_row, ignore_index=True)
+      for row in [mean_row, std_dev_row, min_row, max_row]:
+        scores = scores.append(row, ignore_index=True)
+    '''
+    scores.to_csv(osp.join(args.output, "scores.csv"), index=False)
 
 
 if __name__ == "__main__":

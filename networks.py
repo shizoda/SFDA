@@ -8,6 +8,7 @@ import torch.nn.functional as F
 import torchvision.models as models
 from torch import nn
 from torch import Tensor
+from termcolor import cprint
 
 from utils import compose_acc
 from layers import upSampleConv, conv_block_1, conv_block_3_3, conv_block_Asym
@@ -28,10 +29,11 @@ def export_for_netron(model, input_shape, output_dir, filename="model.onnx"):
 
 class monai(nn.Module):
     
-    def __init__(self, in_channels=1, out_channels=8, device='cuda', network = "unetpp", img_size=(256, 256), n_layers = 3 ):
+    def __init__(self, in_channels=1, out_channels=8, device='cuda', network = "unetpp", img_size=(256, 256), n_layers = 4 ):
         super(monai, self).__init__()
 
         if network.lower() == "unet":
+          cprint("unet with n_layers:" + str(n_layers), "green")
           from monai.networks.nets import UNet
           nG = 32
           self.model = UNet(
@@ -40,11 +42,12 @@ class monai(nn.Module):
               out_channels=out_channels,
               channels=tuple(nG * (2 ** i) for i in range(n_layers)), 
               strides=(2,) * (n_layers - 1),
-              num_res_units=1,
+              num_res_units=0,
               norm='BATCH',
           )
           
         elif network.lower() == "segresnet":
+          cprint("segresnet", "green")
           self.model = SegResNet(
             spatial_dims=2,
             in_channels=in_channels,
@@ -53,6 +56,7 @@ class monai(nn.Module):
           )
 
         elif network.lower() == "unetr":
+           cprint("unetr", "green")
            from monai.networks.nets import UNETR
            self.model = UNETR(
                 img_size=img_size,  # 画像のサイズ
@@ -66,17 +70,19 @@ class monai(nn.Module):
             )
         
         elif network.lower() == "swinunetr":
-           from monai.networks.nets import SwinUNETR
-           self.model = SwinUNETR(
+          cprint("swinunetr", "green")
+          from monai.networks.nets import SwinUNETR
+          self.model = SwinUNETR(
                 img_size=img_size,  # 画像のサイズ
                 in_channels=in_channels,       # 入力チャネル数
                 out_channels=out_channels,      # 出力チャネル数 (クラス数)
                 spatial_dims=2,      # 空間次元数を2Dに設定
                 feature_size=24,     # 特徴サイズ
                 use_checkpoint=False
-            )
+          )
            
         elif network.lower() == "unetpp":
+            cprint("unet++", "green")
             from monai.networks.nets import BasicUNetPlusPlus
             self.model = BasicUNetPlusPlus(
                 spatial_dims=2,
