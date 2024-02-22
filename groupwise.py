@@ -1,5 +1,6 @@
 import ants, groupwise, os, numpy as np, argparse, glob
 from tempfile import mktemp
+import nibabel as nib
 
 # ANTspyの関数を直接インポート
 from ants import registration, apply_transforms, resample_image_to_target
@@ -148,13 +149,43 @@ def apply_transform_to_images(image_names, transforms_dir, reference_image):
 
         # 変形を適用
         img = ants.image_read(img_name)
-        transformed_img = ants.apply_transforms(fixed=reference_image, moving=img, transformlist=[max_iter_transform])
+        transformed_img = ants.apply_transforms(fixed=reference_image, moving=img, transformlist=[max_iter_transform], interpolator="nearestNeighbor")
         transformed_images.append(transformed_img)
 
     return transformed_images
 
 
-# 変形後の画像の保存や処理をここで行う
+
+def create_majority_vote_label_image(transformed_images, transformed_images_npy):
+    """
+    変形後の画像リストから多数決ラベル画像を生成する。
+    """
+    # 画素値を整数型にキャスト
+    image_stack = transformed_images_npy.astype(np.uint16)
+    
+    # 各画素において最も頻度が高いラベル値を計算
+    majority_vote_labels = np.apply_along_axis(lambda x: np.bincount(x, minlength=256).argmax(), axis=-1, arr=image_stack)
+    majority_vote_labels = majority_vote_labels.astype(np.uint8 if np.max(majority_vote_labels) <= 255 else np.uint16)
+
+    return majority_vote_labels
+
+
+def save_transformed_images_as_4d_nifti(transformed_images, output_file_path, affine=np.eye(4)):
+
+    """
+    変形後の画像リストを4D NIfTIファイルとして保存する。
+
+    Args:
+    - transformed_images: 変形後のANTsImageオブジェクトのリスト
+    - output_file_path: 保存する4D NIfTIファイルのパス
+    """
+    # 画像リストから3D NumPy配列を抽出し、4D配列を作成
+    image_data = np.stack([img.numpy() for img in transformed_images], axis=-1)
+    
+    # 4D NumPy配列をNIfTIイメージとして保存
+    nifti_image = nib.Nifti1Image(image_data, affine=affine)
+    nib.save(nifti_image, output_file_path)
+    return image_data
 
 
 if __name__ == "__main__":
@@ -185,4 +216,8 @@ if __name__ == "__main__":
 
     # 変形を適用
     print("Applying transforms to images...")
-    apply_transform_to_images(label_files, output_transforms_dir, template_image)
+    transformed_images = apply_transform_to_images(label_files, output_transforms_dir, template_image)
+    transformed_images_npy = save_transformed_images_as_4d_nifti(transformed_images, os.path.join(args.output, "transformed_images_as_4d.nii.gz"))
+
+    majority_image = create_majority_vote_label_image(transformed_images, transformed_images_npy)
+    nib.save(nib.Nifti1Image(majority_image, affine=np.eye(4)), os.path.join(args.output, "majority_vote_labels.nii.gz"))
