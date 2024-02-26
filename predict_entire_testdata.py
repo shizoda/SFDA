@@ -18,7 +18,7 @@ from termcolor import colored, cprint
 import pandas as pd
 
 
-def evaluate_segmentation(output_array, gt_array, filename, n_classes=5):
+def evaluate_segmentation(output_array, gt_array, filename, n_classes=4):
     """
     Updated evaluation function that also calculates and includes mean metrics for precision, recall, and dice score,
     along with individual class metrics, all rounded to 3 decimal places.
@@ -38,23 +38,31 @@ def evaluate_segmentation(output_array, gt_array, filename, n_classes=5):
     recalls = []
     dices = []
 
+    total_tp = 0
+    total_fp = 0
+    total_fn = 0
+
     # Calculate metrics for each class
-    for i in range(n_classes):
+    for i in range(1, n_classes+1):
         tp = np.sum((output_array == i) & (gt_array == i))
         fp = np.sum((output_array == i) & (gt_array != i))
         fn = np.sum((output_array != i) & (gt_array == i))
         
+        total_tp += tp
+        total_fp += fp
+        total_fn += fn
+
         precision = round(tp / (tp + fp) if tp + fp > 0 else 0, 3)
         recall = round(tp / (tp + fn) if tp + fn > 0 else 0, 3)
         dice = round((2 * tp) / (2 * tp + fp + fn) if (2 * tp + fp + fn) > 0 else 0, 3)
         
         # Update metrics dictionary
-        metrics[f"Class{i+1}-TP"] = tp
-        metrics[f"Class{i+1}-FP"] = fp
-        metrics[f"Class{i+1}-FN"] = fn
-        metrics[f"Class{i+1}-Prec"] = precision
-        metrics[f"Class{i+1}-Recall"] = recall
-        metrics[f"Class{i+1}-Dice"] = dice
+        metrics[f"Class{i}-TP"] = tp
+        metrics[f"Class{i}-FP"] = fp
+        metrics[f"Class{i}-FN"] = fn
+        metrics[f"Class{i}-Prec"] = precision
+        metrics[f"Class{i}-Recall"] = recall
+        metrics[f"Class{i}-Dice"] = dice
         
         # Append class metrics for calculating means
         precisions.append(precision)
@@ -65,6 +73,15 @@ def evaluate_segmentation(output_array, gt_array, filename, n_classes=5):
     metrics["Mean-Prec"] = round(np.mean(precisions), 3)
     metrics["Mean-Recall"] = round(np.mean(recalls), 3)
     metrics["Mean-Dice"] = round(np.mean(dices), 3)
+
+    # Calculate Mean2 metrics using total TP, FP, FN
+    mean2_precision = total_tp / (total_tp + total_fp) if total_tp + total_fp > 0 else 0
+    mean2_recall = total_tp / (total_tp + total_fn) if total_tp + total_fn > 0 else 0
+    mean2_dice = (2 * total_tp) / (2 * total_tp + total_fp + total_fn) if (2 * total_tp + total_fp + total_fn) > 0 else 0
+
+    metrics["Mean2-Prec"] = round(mean2_precision, 3)
+    metrics["Mean2-Recall"] = round(mean2_recall, 3)
+    metrics["Mean2-Dice"] = round(mean2_dice, 3)
     metrics['Filename'] = filename
 
     # Create DataFrame from metrics dictionary
@@ -234,7 +251,7 @@ def postprocess(prediction, size_reference, window_size=3):
     return weighted_median_filter(prediction, weights, footprint)
 
 
-def process_file(file_path, model, modal, output_dir, device, args, sliding_window=False, patch_size=(256, 256), stride=(192, 192), num_classes=5, ideal_size_file = None):
+def process_file(file_path, model, modal, output_dir, device, args, sliding_window=False, patch_size=(256, 256), stride=(192, 192), num_classes=4, ideal_size_file = None):
     
     # load image
     img_nii = nib.load(file_path)

@@ -59,7 +59,7 @@ def build_template_and_save_transforms(
     **kwargs
 ):
     if "type_of_transform" not in kwargs:
-        type_of_transform = "SyN"
+        type_of_transform = "Elastic"
     else:
         type_of_transform = kwargs.pop("type_of_transform")
 
@@ -165,7 +165,7 @@ def create_majority_vote_label_image(transformed_images, transformed_images_npy)
     
     # 各画素において最も頻度が高いラベル値を計算
     majority_vote_labels = np.apply_along_axis(lambda x: np.bincount(x, minlength=256).argmax(), axis=-1, arr=image_stack)
-    majority_vote_labels = majority_vote_labels.astype(np.uint8 if np.max(majority_vote_labels) <= 255 else np.uint16)
+    majority_vote_labels = majority_vote_labels.astype(np.uint8 if np.max(majority_vote_labels) <= 255 else np.uint16)[::-1, ::-1, ::-1]
 
     return majority_vote_labels
 

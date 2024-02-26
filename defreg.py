@@ -1,4 +1,4 @@
-import ants, pdb, time
+import ants, pdb, time, os
 import numpy as np
 import argparse
 from tqdm import tqdm
@@ -31,7 +31,7 @@ def register_multiclass_labels_with_single_deformation(fixed_image, moving_image
                                                        grad_step=0.2, flow_sigma=3, total_sigma=0,
                                                        syn_metric='mattes', syn_sampling=32,
                                                        reg_iterations=(40, 20, 0),
-                                                       verbose=1, return_numpy=False, **kwargs):
+                                                       verbose=0, return_numpy=False, **kwargs):
 
     unique_labels = np.unique(moving_image.numpy())[1:]  # 最初の要素0をスキップ
 
@@ -66,12 +66,14 @@ def main():
     args = parser.parse_args()
 
     if args.output_image is None:
-        args.output_image = args.fixed_image.replace('.nii.gz', f'_registered_{args.transformation_type}.nii.gz')
+        args.output_image = os.path.join(os.path.dirname(args.fixed_image),  "reg_" + args.transformation_type, os.path.basename(args.fixed_image).replace('.nii.gz', f'_reg_{args.transformation_type}.nii.gz'))
+
+    os.makedirs(os.path.dirname(args.output_image), exist_ok=True)
 
     fixed_image = ants.image_read(args.fixed_image)
     moving_image = ants.image_read(args.moving_image)
 
-    # 画像登録関数の呼び出し
+    print(f"Registering {os.path.basename(args.moving_image)} to {os.path.basename(args.fixed_image)} using {args.transformation_type} transformation.")
     output_labels = register_multiclass_labels_with_single_deformation(fixed_image, moving_image, args.transformation_type, aff_metric="meansquares", syn_metric="meansquares")
     ants.image_write(output_labels, args.output_image)
 
