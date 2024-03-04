@@ -441,7 +441,7 @@ def divide_nifti(input_dir_files, output_dir, resolution=(0.5, 0.5, 0.5), patch_
         
         print()
         print("Started writing slices")
-        output_file_paths = [save_slices(slice_info, base_name, np.diag((resolution[0], resolution[1], resolution[2], 1)), sequence_number, output_subdir_path, idx, mode, modal) \
+        output_file_paths = [save_slices(slice_info, base_name, out_affine, sequence_number, output_subdir_path, idx, mode, modal) \
                              for idx, slice_info in tqdm(enumerate(slices), total=len(slices), desc=f"Saving patches from {base_name}", leave=False) ]
 
         save_slices_to_csv(slices, output_file_paths, base_name, output_subdir_path, sequence_number)
@@ -494,10 +494,13 @@ def calc_average_list(df, col_name = 'val_gt_size'):
   def calculate_average_at_position(lst, position):
       values_at_position = [x[position] for x in lst]
       return sum(values_at_position) / len(values_at_position)
-
-  # Calculate the average value of each element at each position in col_name column and store the results in a list
-  num_elements = len(df[col_name][0])
-  average_list = [calculate_average_at_position(df[col_name], i) for i in range(num_elements)]
+  try:
+    # Calculate the average value of each element at each position in col_name column and store the results in a list
+    num_elements = len(df[col_name][0])
+    average_list = [calculate_average_at_position(df[col_name], i) for i in range(num_elements)]
+  except Exception as e:
+    print("Error in calc_average_list", e)
+    pdb.set_trace()
 
   return average_list
 
@@ -505,19 +508,48 @@ def round_floats_in_list(lst):
     return [round(float_item, 2) for float_item in lst]
 
 
-def extract(input_dir, img_files, modal, mode, out_base_dir, df_train=None, fold=0, resolution=(0.5, 0.5, 0.5), debug=False, mean_gt_size=None, sim_dir=None, csv_suffix="", perform_save=True, overlap_dir=None):
+
+def rotate_axis(img_array, plane_orientation):
+    """
+    Rotate the image data to the specified plane orientation.
+    
+    Parameters:
+    - img_array: numpy.ndarray, the input image data.
+    - plane_orientation: str, the target plane orientation ('axial', 'coronal', 'sagittal').
+    
+    Returns:
+    - rotated_img_array: numpy.ndarray, the rotated image data.
+    """
+    if plane_orientation == "axial":
+        # For axial plane, use the original array as is
+        rotated_img_array = img_array
+    elif plane_orientation == "coronal":
+        # For coronal plane, swap x and z axes
+        rotated_img_array = np.swapaxes(img_array, 0, 2)
+        rotated_img_array = np.flip(rotated_img_array, 1)  # Flip along the y-axis
+    elif plane_orientation == "sagittal":
+        # For sagittal plane, swap y and z axes
+        rotated_img_array = np.swapaxes(img_array, 1, 2)
+        rotated_img_array = np.flip(rotated_img_array, 1)  # Flip along the y-axis
+    else:
+        raise ValueError(f"Unsupported plane_orientation: {plane_orientation}")
+    
+    return rotated_img_array
+
+
+def extract(input_dir, img_files, modal, mode, out_base_dir, df_train=None, fold=0, resolution=(0.5, 0.5, 0.5), debug=False, mean_gt_size=None, sim_dir=None, csv_suffix="", perform_save=True, overlap_dir=None, patch_size=(224,224), plane="axial"):
 
   # Output directory
   # Following some famous methods' style, testing datasets are extracted to "val" directory.
   print(modal, ",", mode, ":", len(img_files), "files are used")
-  patch_dir = os.path.join( out_base_dir, modal, "train" if mode=="train" else "val" )
+  patch_dir = os.path.join( out_base_dir + "_" + plane, modal, "train" if mode=="train" else "val" )
   os.makedirs(os.path.join(patch_dir, "IMG"), exist_ok=True)
   os.makedirs(os.path.join(patch_dir, "GT"), exist_ok=True)
   if sim_dir is not None:
      os.makedirs(os.path.join(patch_dir, "SIMGT"), exist_ok=True)
 
   # Saving file list
-  with open( os.path.join(out_base_dir, "list_"+ modal + "_" + mode + ".txt" ), 'w') as fp:
+  with open( os.path.join(out_base_dir+ "_" + plane, "list_"+ modal + "_" + mode + ".txt" ), 'w') as fp:
     _ = [fp.write(os.path.basename(file) + "\n") for file in img_files]
 
   # data frame for sizes
@@ -543,11 +575,16 @@ def extract(input_dir, img_files, modal, mode, out_base_dir, df_train=None, fold
     
     img_array = np.array(img_nifti.dataobj).astype(np.float32)
     label_array = np.array(label_nifti.dataobj)
+
+    img_array = rotate_axis(img_array, plane)
+    label_array = rotate_axis(label_array, plane)
+
     if np.isin(label_array, [500,600,420,550,205,820,850]).any():
        print("Value mapping performed")
        label_array = value_mapping(label_array).astype(np.uint8)
 
-    if img_reso != resolution:
+    if tuple(img_reso) != tuple(resolution):
+      print("Resampling to resolution", resolution, "from", img_reso)
       img_array = data_zoom(img_array, img_reso)
       label_array = data_zoom(label_array, img_reso)
     
@@ -607,7 +644,7 @@ def extract(input_dir, img_files, modal, mode, out_base_dir, df_train=None, fold
     for i, (patch_img, patch_label) in enumerate(tqdm(zip(patches_img, patches_label), desc="Saving patches:" + img_file, leave=False)):
 
         # Save patches
-        out_nifti = np.diag((resolution[0], resolution[1], resolution[2], 1.0))
+        out_nifti = np.diag((resolution[0], resolution[1], -resolution[2], 1.0))
         out_name = ("val" if mode=="test" else "" ) + modal + "slice" + str(serial) + "_1.nii"
         patch_img_out = np.repeat(patch_img.reshape((1, patch_size[0], patch_size[1], 1)), 3, axis=3)
 
@@ -619,14 +656,24 @@ def extract(input_dir, img_files, modal, mode, out_base_dir, df_train=None, fold
             save_as_nifti(sim_dict["patches"][i, np.newaxis, :, :].astype(np.uint8), out_nifti, os.path.join(patch_dir, "SIMGT", out_name))
 
         val_gt_size = calc_mean_sizes(patch_label)
-        new_data = {'input_file': os.path.basename(img_file).replace(".nii.gz", ""), 'val_ids': out_name, 'val_gt_size': val_gt_size, 'dumbpredwtags': (val_gt_size if mean_gt_size is None else mean_gt_size)}
+        new_data = {'input_file': os.path.basename(img_file).replace(".nii.gz", ""),
+                    'val_ids': out_name,
+                    'val_gt_size': val_gt_size,
+                    'dumbpredwtags': (val_gt_size if mean_gt_size is None else mean_gt_size)
+        }
+                    # 'dumbprednotags': [np.sum(val_gt_size) // len(val_gt_size) for _ in range(len(val_gt_size))]}  # dummy values
         
         if sim_dict is not None:
           val_sim_size = calc_mean_sizes(sim_dict["patches"][i, ...])
           new_data['val_sim_size'] = val_sim_size
         new_data.update(patch_info.iloc[i].to_dict())
 
-        df = df.append(new_data, ignore_index=True)
+        # df = df.append(new_data, ignore_index=True)
+        try:
+          df = pd.concat([df, pd.DataFrame([new_data])], ignore_index=True)
+        except Exception as exc:
+          print("Error in pd.concat", exc)
+          import pdb; pdb.set_trace()
         serial += 1
 
   # Sizes for "dumbpredwtags" and "dumbprednotags"
@@ -637,10 +684,7 @@ def extract(input_dir, img_files, modal, mode, out_base_dir, df_train=None, fold
     print("Size calculation from training dataset")
     df_here = df_train
 
-  try:
-    df["dumbprednotags"] = [calc_average_list(df_here)]*len(df)
-  except Exception as exc:
-     import pdb; pdb.set_trace()
+  df["dumbprednotags"] = [calc_average_list(df_here)]*len(df)
 
   df['dumbpredwtags'] = [[x[n] if size[n] > 0 else 0 for n in range(len(x))] for x, size in zip(df['dumbprednotags'], df['val_gt_size'])]
 

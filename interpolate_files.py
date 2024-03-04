@@ -36,7 +36,7 @@ def adjust_center_for_crop(c, half_size, length):
 
 
 
-def crop_image_with_padding(image, label, crop_size, method='centroid', important=[1,2,3,4,5]):
+def crop_image_with_padding(image, label, crop_size, method='centroid', important=[1,2,3,4,5], modal="ct"):
     """
     Crop the image around the specified labels' centroid or to minimize margin, and pad if the cropped size is smaller than crop_size.
 
@@ -97,10 +97,12 @@ def crop_image_with_padding(image, label, crop_size, method='centroid', importan
     print(coords, start, end)
     print(cropped_image.shape, end=" --> ")
 
+
     # Calculate padding if necessary
+    cval = -1000 if modal == "ct" else 0  # Use -1000 for CT and 0 for MR
     pad_width = calculate_pad_width(cropped_image.shape, crop_size)
-    cropped_image = np.pad(cropped_image, pad_width, mode='constant', constant_values=0)
-    cropped_label = np.pad(cropped_label, pad_width, mode='constant', constant_values=0)
+    cropped_image = np.pad(cropped_image, pad_width, mode='constant', constant_values=cval)
+    cropped_label = np.pad(cropped_label, pad_width, mode='constant', constant_values=cval)
     print(cropped_image.shape)
 
     return cropped_image, cropped_label
@@ -141,7 +143,7 @@ def main():
     parser.add_argument('-i', '--input', default="./mmwhs_orig/ct_train", help="Input directory containing nifti files.")
     parser.add_argument('-o', '--output', default=None, help="Output directory to save resampled nifti files.")
     parser.add_argument('-r', '--resolution', nargs=3, type=float, default=[0.75, 0.75, 0.75], help="Resolution after resampling.")
-    parser.add_argument('-s', '--crop_size', type=float, default=[224, 224, 224])
+    parser.add_argument('-s', '--crop_size', type=float, default=[288, 288, 288])
     parser.add_argument("-m", "--crop_method", type=str, default="centroid", help="Method for cropping the image.")
     args = parser.parse_args()
 
@@ -174,7 +176,7 @@ def main():
 
         # Crop the image and label
         os.makedirs(os.path.join(args.output, "cropped"), exist_ok=True)
-        image_arr, label_arr = crop_image_with_padding(image_arr, label_arr, args.crop_size, method=args.crop_method)
+        image_arr, label_arr = crop_image_with_padding(image_arr, label_arr, args.crop_size, method=args.crop_method, modal="ct" if "ct" in args.input else "mr")
 
         nib.save(nib.Nifti1Image(image_arr, new_affine), os.path.join(args.output, "cropped", file_name.replace("label", "image")))
         nib.save(nib.Nifti1Image(label_arr, new_affine), os.path.join(args.output, "cropped", file_name))

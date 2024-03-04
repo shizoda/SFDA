@@ -211,7 +211,7 @@ def setup(args, n_class, dtype) -> Tuple[Any, Any, Any, List[Callable], List[flo
 def do_epoch(args, mode: str, net: Any, device: Any, epc: int,
              loss_fns: List[Callable], loss_weights: List[float],
               new_w:int, C: int, metric_axis:List[int], savedir: str = "",
-             optimizer: Any = None, target_loader: Any = None, best_dice3d_val:Any=None):
+             optimizer: Any = None, target_loader: Any = None, best_dice3d_val:Any=None, batch_shape=[24, 1, 256, 256] ):
 
     assert mode in ["train", "val"]
     L: int = len(loss_fns)
@@ -281,9 +281,9 @@ def do_epoch(args, mode: str, net: Any, device: Any, epc: int,
         n_slices_per_out = find_smallest_multiple(256, args.batch_size)
 
         st = SaveThread()
-        out_stack_image = np.zeros((256,  256, n_slices_per_out), dtype=np.int16)
-        out_stack_pred  = np.zeros((256,  256, n_slices_per_out, args.n_class), dtype=np.float32)
-        out_stack_gt    = np.zeros((256,  256, n_slices_per_out), dtype=np.uint8)
+        out_stack_image = np.zeros((batch_shape[2],  batch_shape[3], n_slices_per_out), dtype=np.int16)
+        out_stack_pred  = np.zeros((batch_shape[2],  batch_shape[3], n_slices_per_out, args.n_class), dtype=np.float32)
+        out_stack_gt    = np.zeros((batch_shape[2],  batch_shape[3], n_slices_per_out), dtype=np.uint8)
         out_stack_posZ  = 0 
         out_stack_idx   = 0
 
@@ -478,12 +478,15 @@ def run(args: argparse.Namespace) -> None:
     target_loader, target_loader_val = get_loaders(args, args.target_dataset,args.target_folders,
                                            args.batch_size, n_class,
                                            args.debug, args.in_memory, dtype, shuffle, "target", args.val_target_folders)
+    
+    first_batch = next(iter(target_loader))
+    batch_shape = first_batch[1].shape
+    print("batch_shape", batch_shape)
 
     print("metric axis",metric_axis)
     best_dice_pos, best_dice, best_hd3d_dice = np.zeros(1), np.zeros(1), np.zeros(1)
     best_3d_dice = best_2d_dice = 0
     print("Results will be saved in ", savedir)
-
 
     print(">>> Starting the training")
     for i in range(start_epoch, n_epoch):
@@ -496,7 +499,7 @@ def run(args: argparse.Namespace) -> None:
                     args.resize,
                     n_class,metric_axis,
                     savedir=savedir,
-                    target_loader=target_loader_val, best_dice3d_val=best_3d_dice)
+                    target_loader=target_loader_val, best_dice3d_val=best_3d_dice, batch_shape=batch_shape)
                 
                 tra_losses_vec = val_losses_vec
                 tra_target_vec = val_target_vec
@@ -511,7 +514,7 @@ def run(args: argparse.Namespace) -> None:
                   n_class, metric_axis,
                   savedir=savedir,
                   optimizer=optimizer,
-                  target_loader=target_loader, best_dice3d_val=best_3d_dice)
+                  target_loader=target_loader, best_dice3d_val=best_3d_dice, batch_shape=batch_shape)
             with torch.no_grad():
                 val_losses_vec, val_target_vec,val_source_vec = do_epoch(
                     args, "val", net, device,
@@ -520,7 +523,7 @@ def run(args: argparse.Namespace) -> None:
                     args.resize,
                     n_class,metric_axis,
                     savedir=savedir,
-                    target_loader=target_loader_val, best_dice3d_val=best_3d_dice)
+                    target_loader=target_loader_val, best_dice3d_val=best_3d_dice, batch_shape=batch_shape)
                 
        current_val_target_2d_dice = val_target_vec[4]
        current_val_target_3d_dice = val_target_vec[0]
