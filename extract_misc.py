@@ -92,7 +92,6 @@ def extract_patches2(img_array, label_array, patch_size, n_patches=1000, axes=(0
 
     for patch_idx in tqdm(range(n_patches), desc=img_name, leave=False): # extra iteration to avoid infinite loop
         
-        # import pdb; pdb.set_trace()
         # Determine whether to find a patch with a label or not
         with_label = np.random.rand() < pos_ratio
         
@@ -245,9 +244,19 @@ def extract_patches(img_array, label_array, patch_size):
     return patches_img, patches_label
 
 
+def cutoff_top_percentile(image, percentile=98):
+    """Cut off the top 2% of the intensity histogram."""
+    cutoff_threshold = np.percentile(image, percentile)
+    image_cropped = np.clip(image, None, cutoff_threshold)
+    
+    return image_cropped
+
    
 def normalize_image(image, modal):
     """Normalize the intensity values of the image"""
+
+    image = cutoff_top_percentile(image)
+
     target_range = (-200, 500) if modal == "ct" else (0, 3000)
     min_val, max_val = target_range
 
@@ -524,20 +533,18 @@ def rotate_axis(img_array, plane_orientation):
         # For axial plane, use the original array as is
         rotated_img_array = img_array
     elif plane_orientation == "coronal":
-        # For coronal plane, swap x and z axes
-        rotated_img_array = np.swapaxes(img_array, 0, 2)
-        rotated_img_array = np.flip(rotated_img_array, 1)  # Flip along the y-axis
+        rotated_img_array = np.transpose(img_array, (0, 2, 1))
+        # rotated_img_array = np.flip(rotated_img_array, 1)  # Flip along the y-axis
     elif plane_orientation == "sagittal":
-        # For sagittal plane, swap y and z axes
-        rotated_img_array = np.swapaxes(img_array, 1, 2)
-        rotated_img_array = np.flip(rotated_img_array, 1)  # Flip along the y-axis
+        rotated_img_array = np.transpose(img_array, (1, 2, 0))
+        # rotated_img_array = np.flip(rotated_img_array, 1)  # Flip along the y-axis
     else:
         raise ValueError(f"Unsupported plane_orientation: {plane_orientation}")
     
     return rotated_img_array
 
 
-def extract(input_dir, img_files, modal, mode, out_base_dir, df_train=None, fold=0, resolution=(0.5, 0.5, 0.5), debug=False, mean_gt_size=None, sim_dir=None, csv_suffix="", perform_save=True, overlap_dir=None, patch_size=(224,224), plane="axial"):
+def extract(input_dir, img_files, modal, mode, out_base_dir, df_train=None, fold=0, resolution=(0.75, 0.75, 0.75), debug=False, mean_gt_size=None, sim_dir=None, csv_suffix="", perform_save=True, overlap_dir=None, patch_size=(224,224), plane="axial"):
 
   # Output directory
   # Following some famous methods' style, testing datasets are extracted to "val" directory.
@@ -590,8 +597,7 @@ def extract(input_dir, img_files, modal, mode, out_base_dir, df_train=None, fold
     
 
     if overlap_dir is not None:
-       # import pdb; pdb.set_trace()
-
+       
        if img_file.find("ct_t")>=0:
          overlap_path = os.path.join(overlap_dir.replace("mr","ct"), "0vx", os.path.basename(img_file).replace("image.nii.gz","") + "label_05mm_simulated.nii.gz")
        else:
@@ -607,7 +613,6 @@ def extract(input_dir, img_files, modal, mode, out_base_dir, df_train=None, fold
     else:
        overlap_array = None
 
-    # import pdb; pdb.set_trace()
     if sim_dir is not None:
       
       if overlap_dir is not None:
@@ -644,12 +649,12 @@ def extract(input_dir, img_files, modal, mode, out_base_dir, df_train=None, fold
     for i, (patch_img, patch_label) in enumerate(tqdm(zip(patches_img, patches_label), desc="Saving patches:" + img_file, leave=False)):
 
         # Save patches
-        out_nifti = np.diag((resolution[0], resolution[1], -resolution[2], 1.0))
+        out_nifti = np.diag((resolution[0], resolution[1], resolution[2], 1.0))
         out_name = ("val" if mode=="test" else "" ) + modal + "slice" + str(serial) + "_1.nii"
         patch_img_out = np.repeat(patch_img.reshape((1, patch_size[0], patch_size[1], 1)), 3, axis=3)
 
         if perform_save:
-          save_as_nifti(patch_img[np.newaxis, ...].astype(np.float32), out_nifti,   os.path.join(patch_dir, "IMG", out_name ))
+          save_as_nifti(patch_img[np.newaxis, ...].astype(np.float32), out_nifti, os.path.join(patch_dir, "IMG", out_name ))
           save_as_nifti(patch_label[np.newaxis, ...].astype(np.uint8), out_nifti, os.path.join(patch_dir, "GT", out_name))
 
         if sim_dict is not None: # this should be performed regardless of perform_save

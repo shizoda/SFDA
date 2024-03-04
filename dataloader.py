@@ -60,7 +60,7 @@ def get_loaders(args, data_folder: str, subfolders:str,
 
     nii_transform = transforms.Compose([
         lambda nd: torch.tensor(nd, dtype=torch.float32),
-        lambda nd: (nd+4) / 8.5,  # max <= 1
+        # lambda nd: (nd+4) / 8.5,  # max <= 1
     ])
 
     nii_gt_transform = transforms.Compose([
@@ -139,7 +139,7 @@ def get_loaders(args, data_folder: str, subfolders:str,
                           bounds_generators=bounds_generators)
 
     data_loader = partial(DataLoader,
-                          num_workers=int(cpu_count()/2)-2,
+                          num_workers=int(cpu_count()/3)-2,
                           #num_workers=min(cpu_count(), batch_size + 4),
                           #num_workers=1,
                           pin_memory=True)
