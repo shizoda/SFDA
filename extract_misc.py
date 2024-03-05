@@ -257,12 +257,16 @@ def normalize_image(image, modal):
 
     image = cutoff_top_percentile(image)
 
-    target_range = (-200, 500) if modal == "ct" else (0, 3000)
+    if modal == "ct":
+        target_range = (-200, 500)
+    else:  # MRI
+        target_range = (0, np.max(image))  # Use the maximum value of the image as the upper bound
+
     min_val, max_val = target_range
 
     normalized_image = (image.astype(np.float32) if image.dtype != np.float32 else image)
     normalized_image = np.clip(normalized_image, min_val, max_val)
-    normalized_image = (normalized_image - min_val) / (max_val - min_val)
+    normalized_image = (normalized_image - min_val) / (max_val - min_val) if max_val > min_val else normalized_image
     
     return normalized_image
 
@@ -549,14 +553,14 @@ def extract(input_dir, img_files, modal, mode, out_base_dir, df_train=None, fold
   # Output directory
   # Following some famous methods' style, testing datasets are extracted to "val" directory.
   print(modal, ",", mode, ":", len(img_files), "files are used")
-  patch_dir = os.path.join( out_base_dir + "_" + plane, modal, "train" if mode=="train" else "val" )
+  patch_dir = os.path.join( out_base_dir, modal, "train" if mode=="train" else "val" )
   os.makedirs(os.path.join(patch_dir, "IMG"), exist_ok=True)
   os.makedirs(os.path.join(patch_dir, "GT"), exist_ok=True)
   if sim_dir is not None:
      os.makedirs(os.path.join(patch_dir, "SIMGT"), exist_ok=True)
 
   # Saving file list
-  with open( os.path.join(out_base_dir+ "_" + plane, "list_"+ modal + "_" + mode + ".txt" ), 'w') as fp:
+  with open( os.path.join(out_base_dir, "list_"+ modal + "_" + mode + ".txt" ), 'w') as fp:
     _ = [fp.write(os.path.basename(file) + "\n") for file in img_files]
 
   # data frame for sizes
@@ -699,8 +703,9 @@ def extract(input_dir, img_files, modal, mode, out_base_dir, df_train=None, fold
   df['dumbprednotags'] = df['dumbprednotags'].apply(round_floats_in_list)
   
   # Write size file 
-  df.to_csv(os.path.join('sizes', "whs" + str(fold) + "_" + modal + csv_suffix + '.csv'), index=False, sep=";", mode="a" if mode in ("test", "val") else "w", header=(mode=="train"))
-  return df_here
+  out_csv_path = os.path.join('sizes', "whs" + str(fold) + "_" + modal + csv_suffix + '.csv')
+  df.to_csv(out_csv_path, index=False, sep=";", mode="a" if mode in ("test", "val") else "w", header=(mode=="train"))
+  return df_here, out_csv_path
 
 
 def split_img_paths(img_files, n, rate=0.8, seed=0, use_valid=False):

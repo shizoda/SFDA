@@ -43,24 +43,26 @@ if __name__=="__main__":
   parser = argparse.ArgumentParser(description='Extract WHS dataset')
   parser.add_argument('-i', '--input_dir', type=str, default='mmwhs_orig', help='input directory')
   parser.add_argument('-is','--input_dir_suffix', type=str, default='_075x075x075/cropped', help='input directory suffix')
+  parser.add_argument('-o', '--output_dir_prefix', type=str, default='patches/data_whs', help='prefix of output directory')
   parser.add_argument('-r', '--resolution', type=float, nargs=3, default=[0.75, 0.75, 0.75], help='resolution')
-  parser.add_argument('-o', '--output_dir', type=str, default='patches/data_whs', help='output directory')
   parser.add_argument('-c', '--simct', type=str, default=None, help="simulated label directory for CT")
   parser.add_argument('-m', '--simmr', type=str, default=None, help="simulated label directory for MR")
   parser.add_argument('-n', '--n_folds', type=int, default=10, help='number of folds')
   parser.add_argument("-O", "--overlaps", action='store_true', help="Use overlaps")
   parser.add_argument("-s", "--patch_size", type=int, nargs=2, default=[224, 224], help="Patch size")
-  parser.add_argument("-p", "--plane", type=str, default="axial", choices=["axial","coronal","sagittal"], help="Plane")
+  parser.add_argument("-p", "--plane", nargs="*", default=["axial", "coronal", "sagittal"], choices=["axial","coronal","sagittal"], help="Plane")
   
   parser.add_argument('--debug', action='store_true')
   args = parser.parse_args()
 
-  args.output_dir = args.output_dir + args.input_dir_suffix.replace("/","_") + "-"+ str(args.patch_size[0]) + "x" + str(args.patch_size[1])
+  for plane in args.plane:
+    output_dir = args.output_dir_prefix + args.input_dir_suffix.replace("/","_").replace("cropped", "cr") + "-"+ str(args.patch_size[0]) + "x" + str(args.patch_size[1])
 
-  if True:
+    
+    cprint(plane, "green")
 
     if args.simct is None and args.simmr is None:
-      out_base_dir_suffix = ""
+      out_base_dir_suffix = "_" + plane
     elif args.simct is not None and args.simmr is not None:
       print("Both simct and simmr are specified. Use only one of them.")
       raise NotImplementedError()
@@ -71,6 +73,8 @@ if __name__=="__main__":
     else:
       raise NotImplementedError()
     csv_suffix = out_base_dir_suffix
+
+    csv_paths = {}
 
     for modal in [ "ct", "mr"]:
 
@@ -105,17 +109,20 @@ if __name__=="__main__":
           import itertools
           targeted_files_all = [(path, path.replace("_image.nii.gz", "_label.nii.gz")) for path in targeted_files ]
 
-          df = extract( input_dir, targeted_files, modal, mode, out_base_dir=args.output_dir + "_" + str(fold_idx+1) + out_base_dir_suffix, df_train = df_train, fold=fold_idx+1, sim_dir=sim_dir, debug = args.debug, csv_suffix = out_base_dir_suffix, overlap_dir=((args.simct if args.simct is not None else args.simmr) if args.overlaps else None), perform_save = True, patch_size=args.patch_size, resolution=args.resolution, plane=args.plane) 
+          df, out_csv_path = extract( input_dir, targeted_files, modal, mode, out_base_dir=output_dir + "_" + str(fold_idx+1) + out_base_dir_suffix, df_train = df_train, fold=fold_idx+1, sim_dir=sim_dir, debug = args.debug, csv_suffix = out_base_dir_suffix, overlap_dir=((args.simct if args.simct is not None else args.simmr) if args.overlaps else None), perform_save = True, patch_size=args.patch_size, resolution=args.resolution, plane=plane) 
+
           if mode=="train":
             df_train = df
+            csv_paths[modal + str(fold_idx+1)] = out_csv_path   # common for "test" mode
 
     for fold_idx, (train_files, test_files) in enumerate(folds):
       if fold_idx > 0:
         print("Skipping some dividing patterns because domain adaptation experiment does not need many patterns.")
         break
 
-      ct_size_path = './sizes/whs' + str(fold_idx+1)  + '_ct' + csv_suffix +  '.csv'
-      mr_size_path = './sizes/whs' + str(fold_idx+1) +  '_mr' + csv_suffix + '.csv'
+      ct_size_path = csv_paths["ct" + str(fold_idx+1)]
+      mr_size_path = csv_paths["mr" + str(fold_idx+1)]
+
       df_ct = pd.read_csv(ct_size_path, sep=";")
       df_mr = pd.read_csv(mr_size_path, sep=";")
 
