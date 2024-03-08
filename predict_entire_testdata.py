@@ -351,22 +351,19 @@ def process_file(file_path, model, modal, output_dir, device, args, sliding_wind
       output_array = rotate_axis(output_array, args.plane, inverse=True)
 
     # save output tensor to nifti file
-    output_file = osp.join(output_dir, osp.basename(file_path).replace('.nii.gz', '_pred.nii.gz'))
+    output_file = osp.join(output_dir, osp.basename(file_path).replace('.nii.gz', '_1pred.nii.gz'))
     nib.save(nib.Nifti1Image(output_array, out_affine), output_file)
     
     # nib.save(nib.Nifti1Image( (1000 * img).astype(np.int16), out_affine), output_file.replace('_pred.nii.gz', '_image.nii.gz'))
-    try:
-        os.symlink(os.path.normpath(osp.relpath(file_path, output_dir)), output_file.replace('_pred.nii.gz', '_image.nii.gz'))
-    except FileExistsError:
-        pass
+  
     
     # post-processing
     if args.postprocess:
       output_array = apply_closing_and_fill_holes_to_multiclass_3d_array(output_array)
       output_array = largest_connected_components(output_array)
-      nib.save(nib.Nifti1Image(output_array, out_affine), output_file.replace("_pred.nii.gz", "_pred_post.nii.gz"))
+      nib.save(nib.Nifti1Image(output_array, out_affine), output_file.replace("_1pred.nii.gz", "_1pred_post.nii.gz"))
 
-    # evaluate
+    # open the ground-truth file if it exists
     label_path = file_path.replace('image', 'gth') if args.carrenD else file_path.replace('_image.nii.gz', '_label.nii.gz')
     if os.path.exists(label_path):
         label_nii = nib.load(label_path)
@@ -378,8 +375,29 @@ def process_file(file_path, model, modal, output_dir, device, args, sliding_wind
           label_arr = label_arr[::-1, ::-1, :]  # flip the image in the x and y axes to match training patches
 
         label_reso = label_nii.header.get_zooms()
-        nib.save(nib.Nifti1Image(label_arr, out_affine), os.path.join(output_dir, osp.basename(file_path).replace('.nii.gz', '_gt.nii.gz')))
 
+        out_label_path = output_file.replace('_1pred.nii.gz', '_2gt.nii.gz')
+        if osp.exists(out_label_path):
+            os.remove(out_label_path)
+        try:
+            os.symlink(os.path.relpath(os.path.realpath(label_path), start=os.path.dirname(out_label_path)), out_label_path)
+        except FileExistsError as exc:
+            print(exc)
+            pass
+
+
+    # create symbolic links to the input image
+    out_image_path = output_file.replace('_1pred.nii.gz', '_3image.nii.gz')
+    if osp.exists(out_image_path):
+        os.remove(out_image_path)
+    try:
+        os.symlink(os.path.relpath(os.path.realpath(file_path), start=os.path.dirname(out_image_path)), out_image_path)
+    except FileExistsError as exc:
+        print(exc)
+        pass
+    
+    # evaluate
+    if os.path.exists(label_path):
         eval = evaluate_segmentation(output_array, label_arr, filename=os.path.basename(file_path), n_classes=num_classes)
         return eval                          
     else:
