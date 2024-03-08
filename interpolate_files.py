@@ -102,7 +102,7 @@ def crop_image_with_padding(image, label, crop_size, method='centroid', importan
     cval = -1000 if modal == "ct" else 0  # Use -1000 for CT and 0 for MR
     pad_width = calculate_pad_width(cropped_image.shape, crop_size)
     cropped_image = np.pad(cropped_image, pad_width, mode='constant', constant_values=cval)
-    cropped_label = np.pad(cropped_label, pad_width, mode='constant', constant_values=cval)
+    cropped_label = np.pad(cropped_label, pad_width, mode='constant', constant_values=0)
     print(cropped_image.shape)
 
     return cropped_image, cropped_label

@@ -138,8 +138,11 @@ def get_loaders(args, data_folder: str, subfolders:str,
                           in_memory=in_memory, augment=args.augment,
                           bounds_generators=bounds_generators)
 
+    n_work = max(int(cpu_count()/3) - 3, 2)
+    print("n_work", n_work)
+    
     data_loader = partial(DataLoader,
-                          num_workers=int(cpu_count()/3)-2,
+                          num_workers=n_work,
                           #num_workers=min(cpu_count(), batch_size + 4),
                           #num_workers=1,
                           pin_memory=True)

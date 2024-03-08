@@ -8,7 +8,6 @@ import nibabel as nib
 import torch.nn as nn
 from torch.nn import functional as F
 import os.path as osp
-# from extract_misc import normalize_image, data_zoom, value_mapping
 from networks import UNet
 from tqdm import tqdm, trange
 from scipy.ndimage import generate_binary_structure, generic_filter
@@ -16,6 +15,8 @@ from collections import Counter
 from scipy.ndimage import binary_closing, generate_binary_structure, binary_fill_holes
 from termcolor import colored, cprint
 import pandas as pd
+
+from extract_misc import rotate_axis, normalize_image
 
 
 def evaluate_segmentation(output_array, gt_array, filename, n_classes=4):
@@ -255,30 +256,29 @@ def process_file(file_path, model, modal, output_dir, device, args, sliding_wind
     
     # load image
     img_nii = nib.load(file_path)
-    # img_nii = nib.as_closest_canonical(img_nii)
-
+    img_nii = nib.as_closest_canonical(img_nii)
     img = np.array(img_nii.dataobj).astype(np.float32)
-    img = img[::-1, ::-1, :]  # flip the image in the x and y axes to match training patches
+    out_affine = img_nii.affine
 
-    # pre-process in "dataloader.py"
-    # lambda nd: (nd+4) / 8.5
-    img = (img + 4.0) / 8.5
+    if args.carrenD:
+      img = (img + 4.0) / 8.5   # pre-process in "dataloader.py"
+      img = img[::-1, ::-1, :]  # flip the image in the x and y axes to match training patches
+    else:
+      img = rotate_axis(img, args.plane)
+      img = normalize_image(img, modal)
+
     img = np.copy(img)
-
-    out_affine = np.diag((1, 1, 1, 1))
-
     output_array = np.zeros(img.shape, dtype=np.uint8)
     # output_array_raw = np.zeros(([num_classes, img.shape[0], img.shape[1], img.shape[2]] ), dtype=np.float32)
 
     if sliding_window:
-
       from torch.nn.functional import softmax
       from scipy.ndimage import uniform_filter
 
       for sliceIdx in trange(img.shape[2], leave=False, desc=os.path.basename(file_path)):
           img_slice = torch.from_numpy(img[...,sliceIdx]).float()
           # Array to store the output results
-          output_map = np.zeros((*img[...,sliceIdx].shape, num_classes), dtype=float)
+          output_map = np.zeros((*img[...,sliceIdx].shape, num_classes+1), dtype=float)
           count_map = np.zeros(img[...,sliceIdx].shape, dtype=float)
           img_slice = img_slice.to(device)
 
@@ -293,6 +293,8 @@ def process_file(file_path, model, modal, output_dir, device, args, sliding_wind
                   # Inference on the patch
                   with torch.no_grad():
                       logits = model(patch)
+                      if type(logits) == list:
+                          logits = logits[0]
 
                   # Convert the logits to probabilities with softmax
                   probabilities = softmax(logits, dim=1).squeeze().cpu().numpy()
@@ -345,28 +347,36 @@ def process_file(file_path, model, modal, output_dir, device, args, sliding_wind
           output_slice = torch.argmax(output_slice, dim=0)
           output_array[:,:,i] = output_slice[:img.shape[0], :img.shape[1]].numpy()
 
+    if not args.carrenD:
+      output_array = rotate_axis(output_array, args.plane, inverse=True)
+
     # save output tensor to nifti file
     output_file = osp.join(output_dir, osp.basename(file_path).replace('.nii.gz', '_pred.nii.gz'))
     nib.save(nib.Nifti1Image(output_array, out_affine), output_file)
-    nib.save(nib.Nifti1Image( (1000 * img).astype(np.int16), out_affine), output_file.replace('_pred.nii.gz', '_image.nii.gz'))
-
+    
+    # nib.save(nib.Nifti1Image( (1000 * img).astype(np.int16), out_affine), output_file.replace('_pred.nii.gz', '_image.nii.gz'))
+    try:
+        os.symlink(os.path.normpath(osp.relpath(file_path, output_dir)), output_file.replace('_pred.nii.gz', '_image.nii.gz'))
+    except FileExistsError:
+        pass
+    
     # post-processing
     if args.postprocess:
       output_array = apply_closing_and_fill_holes_to_multiclass_3d_array(output_array)
       output_array = largest_connected_components(output_array)
       nib.save(nib.Nifti1Image(output_array, out_affine), output_file.replace("_pred.nii.gz", "_pred_post.nii.gz"))
 
-    # label_path = file_path.replace('_image.nii.gz', '_gt.nii.gz')
-    label_path = file_path.replace('image', 'gth')
-
+    # evaluate
+    label_path = file_path.replace('image', 'gth') if args.carrenD else file_path.replace('_image.nii.gz', '_label.nii.gz')
     if os.path.exists(label_path):
         label_nii = nib.load(label_path)
-        # label_nii = nib.as_closest_canonical(label_nii)
-
+        label_nii = nib.as_closest_canonical(label_nii)
         label_arr = np.array(label_nii.dataobj).astype(np.uint8)
-        
-        # label_arr = np.transpose(label_arr, (1, 2, 0))
-        label_arr = label_arr[::-1, ::-1, :]  # flip the image in the x and y axes to match training patches
+        label_arr = rotate_axis(label_arr, args.plane)
+      
+        if args.carrenD:
+          label_arr = label_arr[::-1, ::-1, :]  # flip the image in the x and y axes to match training patches
+
         label_reso = label_nii.header.get_zooms()
         nib.save(nib.Nifti1Image(label_arr, out_affine), os.path.join(output_dir, osp.basename(file_path).replace('.nii.gz', '_gt.nii.gz')))
 
@@ -397,19 +407,31 @@ def parse_args():
                         help='Path to the directory of input nifti files.')
     parser.add_argument('-o', '--output', type=str, default=None,
                         help='Path to the output directory.')
-    parser.add_argument('-m', '--modal', type=str, required=False,
-                        choices=['ct', 'mr'], default=None,
+    parser.add_argument('-m', '--modal', type=str, default=None,
+                        choices=['ct', 'mr'], 
                         help='Modality of the input image (ct or mr).')
+    parser.add_argument("-pl", "--plane", default=None, choices=["axial","coronal","sagittal"], help="Axial, coronal or sagittal plane. Adjust to the trained model")
     parser.add_argument('-s', '--sizeref', type=str, default=None,
                         help='File for size reference.')
     parser.add_argument('-w', '--sliding_window', action='store_true')
     parser.add_argument('-pp', '--postprocess', action='store_true')
     parser.add_argument('-v', '--verbose', type=int, default=1)
+    parser.add_argument("--carrenD", action="store_true", help="carrenD data available at https://github.com/carrenD/Medical-Cross-Modality-Domain-Adaptation")
 
     args = parser.parse_args()
+
     if args.modal is None:
         args.modal = "ct" if "ct_" in args.input else "mr"
         print("Modality not provided. Using default modality: {}".format(args.modal))
+
+    if args.plane is None:
+        if args.pkl.find("sagittal") > 0:
+            args.plane = "sagittal"
+        elif args.pkl.find("coronal") > 0:
+            args.plane = "coronal"
+        else:
+            args.plane = "axial"
+        print("Plane not provided. Using estimated plane: {}".format(args.plane))
 
     # Set output directory to be "entire" in the model file's directory if not provided
     if args.output is None:
@@ -428,8 +450,7 @@ def main():
     # load model
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = torch.load(args.pkl)
-    model = model.to(device)
-    # model.eval()
+    model = model.eval().to(device)
 
     # output directory
     os.makedirs(args.output, exist_ok=True)
@@ -441,9 +462,12 @@ def main():
     pbar = tqdm(input_files, unit="file")
 
     scores = []
+
     for file_path in pbar:
         # pbar.set_description(f"Processing {file_path}")
-        score = process_file(file_path, model, args.modal, args.output, device,args, ideal_size_file=args.sizeref, sliding_window=args.sliding_window)
+        score = process_file(file_path, model, args.modal, args.output, device,args, ideal_size_file=args.sizeref, sliding_window=args.sliding_window,
+                             patch_size=(256, 256) if args.carrenD else (224, 224),
+                             num_classes=4 if args.carrenD else 7)
         scores.append(score)
     pbar.close()
 

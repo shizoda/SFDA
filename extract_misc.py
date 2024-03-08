@@ -522,7 +522,7 @@ def round_floats_in_list(lst):
 
 
 
-def rotate_axis(img_array, plane_orientation):
+def rotate_axis(img_array, plane_orientation, inverse=False):
     """
     Rotate the image data to the specified plane orientation.
     
@@ -533,17 +533,27 @@ def rotate_axis(img_array, plane_orientation):
     Returns:
     - rotated_img_array: numpy.ndarray, the rotated image data.
     """
-    if plane_orientation == "axial":
-        # For axial plane, use the original array as is
-        rotated_img_array = img_array
-    elif plane_orientation == "coronal":
-        rotated_img_array = np.transpose(img_array, (0, 2, 1))
-        # rotated_img_array = np.flip(rotated_img_array, 1)  # Flip along the y-axis
-    elif plane_orientation == "sagittal":
-        rotated_img_array = np.transpose(img_array, (1, 2, 0))
-        # rotated_img_array = np.flip(rotated_img_array, 1)  # Flip along the y-axis
+    if inverse:
+      if plane_orientation == "axial":
+          rotated_img_array = img_array
+      elif plane_orientation == "coronal":
+          rotated_img_array = np.transpose(img_array, (0, 2, 1))
+      elif plane_orientation == "sagittal":
+          rotated_img_array = np.transpose(img_array, (2, 0, 1))
+      else:
+          raise ValueError(f"Unsupported plane_orientation: {plane_orientation}")
     else:
-        raise ValueError(f"Unsupported plane_orientation: {plane_orientation}")
+      if plane_orientation == "axial":
+          # For axial plane, use the original array as is
+          rotated_img_array = img_array
+      elif plane_orientation == "coronal":
+          rotated_img_array = np.transpose(img_array, (0, 2, 1))
+          # rotated_img_array = np.flip(rotated_img_array, 1)  # Flip along the y-axis
+      elif plane_orientation == "sagittal":
+          rotated_img_array = np.transpose(img_array, (1, 2, 0))
+          # rotated_img_array = np.flip(rotated_img_array, 1)  # Flip along the y-axis
+      else:
+          raise ValueError(f"Unsupported plane_orientation: {plane_orientation}")
     
     return rotated_img_array
 
