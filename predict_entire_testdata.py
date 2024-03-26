@@ -252,7 +252,7 @@ def postprocess(prediction, size_reference, window_size=3):
     return weighted_median_filter(prediction, weights, footprint)
 
 
-def process_file(file_path, model, modal, output_dir, device, args, sliding_window=False, patch_size=(256, 256), stride=(192, 192), num_classes=4, ideal_size_file = None):
+def process_file(file_path, model, modal, output_dir, device, args, sliding_window=False, patch_size=(256, 256), stride=(32, 32), num_classes=4, ideal_size_file = None):
     
     # load image
     img_nii = nib.load(file_path)
@@ -269,7 +269,7 @@ def process_file(file_path, model, modal, output_dir, device, args, sliding_wind
 
     img = np.copy(img)
     output_array = np.zeros(img.shape, dtype=np.uint8)
-    # output_array_raw = np.zeros(([num_classes, img.shape[0], img.shape[1], img.shape[2]] ), dtype=np.float32)
+    output_prob_array = np.zeros((*img.shape, num_classes + 1), dtype=np.float32)
 
     if sliding_window:
       from torch.nn.functional import softmax
@@ -277,36 +277,30 @@ def process_file(file_path, model, modal, output_dir, device, args, sliding_wind
 
       for sliceIdx in trange(img.shape[2], leave=False, desc=os.path.basename(file_path)):
           img_slice = torch.from_numpy(img[...,sliceIdx]).float()
-          # Array to store the output results
           output_map = np.zeros((*img[...,sliceIdx].shape, num_classes+1), dtype=float)
           count_map = np.zeros(img[...,sliceIdx].shape, dtype=float)
           img_slice = img_slice.to(device)
-
-          # Split the image with a sliding window
+          
           for i in range(0, img_slice.shape[0] - patch_size[0] + 1, stride[0]):
               for j in range(0, img_slice.shape[1] - patch_size[1] + 1, stride[1]):
-                  # Extract the patch
-                  patch = img_slice[i:i + patch_size[0], j:j + patch_size[1]]
-                  # Shape the patch according to the model input
-                  patch = patch.unsqueeze(0).unsqueeze(0)  # e.g., if the model expects [batch, channel, height, width]
-
-                  # Inference on the patch
+                  patch = img_slice[i:i + patch_size[0], j:j + patch_size[1]].unsqueeze(0).unsqueeze(0)
                   with torch.no_grad():
                       logits = model(patch)
                       if type(logits) == list:
                           logits = logits[0]
-
-                  # Convert the logits to probabilities with softmax
-                  probabilities = softmax(logits, dim=1).squeeze().cpu().numpy()
-
-                  # Add the results of the patch to the output map
+                  probabilities = softmax(logits, dim=1).squeeze().cpu().detach().numpy()
                   output_map[i:i + patch_size[0], j:j + patch_size[1]] += probabilities.transpose((1, 2, 0))
                   count_map[i:i + patch_size[0], j:j + patch_size[1]] += 1
-                  output_map[i:i + patch_size[0], j:j + patch_size[1]] /= count_map[i:i + patch_size[0], j:j + patch_size[1], np.newaxis]
+          
+          output_map /= count_map[..., np.newaxis]
 
-          # Compute the class indices by argmax
           class_map = np.argmax(output_map, axis=-1)
-          output_array[..., sliceIdx] = class_map 
+          output_array[..., sliceIdx] = class_map
+          output_prob_array[..., sliceIdx, :] = output_map
+      # save output tensor to nifti file
+          
+      output_file = osp.join(output_dir, osp.basename(file_path).replace('.nii.gz', '_5count.nii.gz'))
+      nib.save(nib.Nifti1Image(count_map, out_affine), output_file)
 
     else:
       # pad to the nearest power of 2
@@ -322,30 +316,29 @@ def process_file(file_path, model, modal, output_dir, device, args, sliding_wind
         print(f"Class weights: {class_weights}")
 
       for i in trange(img_tensor.shape[2], leave=False, desc=os.path.basename(file_path)):
-          # move slice tensor to GPU and add channel and batch dimensions
-          
+          # スライステンソルをGPUに移動し、チャネルとバッチの次元を追加
           slice_tensor = img_tensor[:,:,i].unsqueeze(0).unsqueeze(0).to(device)
-          # slice_tensor = (slice_tensor + 4.0) / 8.5
-          # forward pass
-
-          model_output = model(slice_tensor)
           
-          if type(model_output) == list: # unet++ or other networks with deep-supervision
-              model_output = model_output[0]
-
           with torch.no_grad():
-            output_slice = model_output.squeeze(0)
+              # モデル推論を実行
+              model_output = model(slice_tensor)
+              
+              # モデル出力がリストの場合、最初の要素を使用
+              if isinstance(model_output, list):
+                  model_output = model_output[0]
 
-          # Move the output to CPU
-          output_slice = output_slice.cpu()
-          
-          # output_array_raw[..., i] = output_slice[:, :img.shape[0], :img.shape[1]].numpy()
+              # model_outputを確率に変換
+              prob_slice = torch.softmax(model_output, dim=1).squeeze().cpu().numpy()
 
-          if ideal_size_file is not None:
-            output_slice = output_slice * class_weights[:, None, None] # apply the weights
+              # 確率データをoutput_prob_arrayに保存
+              # スライスの形状に合わせて確率データをトリミングし、次元の順序を調整
+              output_prob_array[:, :, i, :] = np.transpose(prob_slice[:, :img.shape[0], :img.shape[1]], (1,2,0))
 
-          output_slice = torch.argmax(output_slice, dim=0)
-          output_array[:,:,i] = output_slice[:img.shape[0], :img.shape[1]].numpy()
+              # クラスラベルを取得（argmaxを適用）
+              output_slice = np.argmax(prob_slice, axis=0)
+
+              # クラスラベルデータをoutput_arrayに保存
+              output_array[:, :, i] = output_slice[:img.shape[0], :img.shape[1]]
 
     if not args.carrenD:
       output_array = rotate_axis(output_array, args.plane, inverse=True)
@@ -354,8 +347,10 @@ def process_file(file_path, model, modal, output_dir, device, args, sliding_wind
     output_file = osp.join(output_dir, osp.basename(file_path).replace('.nii.gz', '_1pred.nii.gz'))
     nib.save(nib.Nifti1Image(output_array, out_affine), output_file)
     
-    # nib.save(nib.Nifti1Image( (1000 * img).astype(np.int16), out_affine), output_file.replace('_pred.nii.gz', '_image.nii.gz'))
-  
+    # 4次元の出力確率テンソルをNIfTIファイルとして保存
+    output_prob_array = (1000 * output_prob_array).astype(np.uint16).astype(np.float32) / 1000.0 # reduce size by rounding to 3 decimal places
+    prob_output_file = osp.join(output_dir, osp.basename(file_path).replace('.nii.gz', '_4prob.nii.gz'))
+    nib.save(nib.Nifti1Image(output_prob_array, out_affine), prob_output_file)
     
     # post-processing
     if args.postprocess:
